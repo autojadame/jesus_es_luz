@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { app } from "electron";
 
-const LIB_BASE = "\\\\JobMedical\\Storage\\INFORMATICOS\\Lis\\AlabanzasCristo";
+const LIB_BASE = "\\\\192.168.1.143\\Storage\\INFORMATICOS\\Lis\\AlabanzasCristo";
 
 function pad2(n: number) {
   return String(n).padStart(2, "0");
