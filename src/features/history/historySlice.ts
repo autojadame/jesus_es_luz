@@ -23,7 +23,14 @@ const historySlice = createSlice({
     clearHistory(state) {
       state.entries = [];
     },
-
+    updateSongTitleForLatestByPassage(
+      state,
+      action: PayloadAction<{ passageId: number; songTitulo: string }>
+    ) {
+      const e = state.entries.find((x) => x.passageId === action.payload.passageId);
+      if (!e) return;
+      e.songTitulo = action.payload.songTitulo;
+    },
     // ✅ para Process (si quieres seguir usando "latest por pasaje")
     setSavedFileForLatestByPassage(
       state,

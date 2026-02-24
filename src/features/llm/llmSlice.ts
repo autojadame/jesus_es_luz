@@ -12,6 +12,13 @@ type LlmState = {
 
   // ✅ ids del lote que se va a procesar en /process
   processBatchIds: number[];
+
+
+  // dentro de LlmState
+  songTitleStatusById: Record<number, "idle" | "loading" | "done" | "error">;
+  songTitleErrorById: Record<number, string | undefined>;
+  usedTitlesGlobal: string[]; // cache global (normalizado)
+  usedTitlesByPassage: Record<number, string[]>; // cache por pasaje (normalizado)
 };
 
 const initialState: LlmState = {
@@ -23,6 +30,12 @@ const initialState: LlmState = {
   songsErrorById: {},
 
   processBatchIds: [],
+
+
+  songTitleStatusById: {},
+  songTitleErrorById: {},
+  usedTitlesGlobal: [],
+  usedTitlesByPassage: {},
 };
 
 const llmSlice = createSlice({
@@ -68,6 +81,33 @@ const llmSlice = createSlice({
     clearProcessBatch(state) {
       state.processBatchIds = [];
     },
+    songTitleStart(state, action: PayloadAction<{ passageId: number }>) {
+      state.songTitleStatusById[action.payload.passageId] = "loading";
+      state.songTitleErrorById[action.payload.passageId] = undefined;
+    },
+    songTitleSuccess(state, action: PayloadAction<{ passageId: number; title: string; norm: string }>) {
+      const { passageId, title, norm } = action.payload;
+      state.songTitleStatusById[passageId] = "done";
+      state.songTitleErrorById[passageId] = undefined;
+
+      // ✅ actualiza solo el título en songsById (si existe)
+      const cur = state.songsById?.[passageId];
+      if (!cur) return;        // ✅ no inventes una canción incompleta
+      cur.titulo = title;
+
+      // ✅ cache global
+      if (!state.usedTitlesGlobal.includes(norm)) state.usedTitlesGlobal.push(norm);
+
+      // ✅ cache por pasaje
+      state.usedTitlesByPassage[passageId] = state.usedTitlesByPassage[passageId] || [];
+      if (!state.usedTitlesByPassage[passageId].includes(norm)) {
+        state.usedTitlesByPassage[passageId].push(norm);
+      }
+    },
+    songTitleError(state, action: PayloadAction<{ passageId: number; error: string }>) {
+      state.songTitleStatusById[action.payload.passageId] = "error";
+      state.songTitleErrorById[action.payload.passageId] = action.payload.error;
+    },
   },
 });
 
@@ -81,6 +121,9 @@ export const {
   resetSongs,
   setProcessBatch,
   clearProcessBatch,
+  songTitleStart,
+  songTitleSuccess,
+  songTitleError,
 } = llmSlice.actions;
 
 export default llmSlice.reducer;

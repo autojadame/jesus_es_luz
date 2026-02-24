@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import styled from "styled-components";
 import { Loader } from "@/ui/components/Loader";
+import { flushSync } from "react-dom";
 
 const Zone = styled.div<{ $over?: boolean; $busy?: boolean }>`
   margin-top: 12px;
@@ -17,9 +18,8 @@ const Zone = styled.div<{ $over?: boolean; $busy?: boolean }>`
 
   transition: filter 0.14s ease, border-color 0.14s ease, background 0.14s ease;
 
-  cursor: ${({ $busy }) => ($busy ? "default" : "pointer")};
+  cursor: ${({ $busy }) => ($busy ? "progress" : "pointer")};
   user-select: none;
-  pointer-events: ${({ $busy }) => ($busy ? "none" : "auto")};
 
   .t {
     font-weight: 850;
@@ -45,66 +45,123 @@ const Zone = styled.div<{ $over?: boolean; $busy?: boolean }>`
   }
 `;
 
+const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
+
+function isAllowedFile(f: File) {
+  const name = (f?.name ?? "").toLowerCase();
+  return name.endsWith(".mp3") || name.endsWith(".srt");
+}
+
 export function DropZone({
   onDropFile,
+  onInfo,
 }: {
   onDropFile: (file: File) => Promise<void> | void;
+  onInfo?: (msg: string) => void; // optional toast hook
 }) {
   const [over, setOver] = useState(false);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<{ i: number; n: number } | null>(null);
 
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  async function processFiles(files: File[]) {
+    const allowed = files.filter(isAllowedFile);
+    const rejected = files.length - allowed.length;
+
+    if (!allowed.length) {
+      onInfo?.("Only .mp3 or .srt files are allowed.");
+      return;
+    }
+    if (rejected > 0) onInfo?.(`Ignored ${rejected} file(s). Only .mp3/.srt are accepted.`);
+
+    flushSync(() => {
+      setBusy(true);
+      setProgress({ i: 0, n: allowed.length });
+    });
+
+    await nextFrame(); // ensure loader paints
+
+    try {
+      for (let i = 0; i < allowed.length; i++) {
+        setProgress({ i: i + 1, n: allowed.length });
+        await Promise.resolve(onDropFile(allowed[i]));
+      }
+    } finally {
+      flushSync(() => {
+        setProgress(null);
+        setBusy(false);
+      });
+    }
+  }
+
   return (
-    <Zone
-      $over={over}
-      $busy={busy}
-      onDragOver={(e) => {
-        e.preventDefault();
-        if (!busy) setOver(true);
-      }}
-      onDragLeave={() => setOver(false)}
-      onDrop={async (e) => {
-        e.preventDefault();
-        if (busy) return;
+    <>
+      <Zone
+        $over={over}
+        $busy={busy}
+        title="Drop MP3/SRT here or click to select"
+        onClick={() => {
+          if (busy) return;
+          inputRef.current?.click();
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (busy) return;
+          setOver(true);
+        }}
+        onDragLeave={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (busy) return;
+          setOver(false);
+        }}
+        onDrop={async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (busy) return;
 
-        setOver(false);
+          setOver(false);
+          const files = Array.from(e.dataTransfer.files ?? []);
+          if (!files.length) return;
 
-        const files = Array.from(e.dataTransfer.files ?? []);
-        if (!files.length) return;
-
-        setBusy(true);
-        setProgress({ i: 0, n: files.length });
-
-        try {
-          // ✅ secuencial: evita saturar IPC / red
-          for (let i = 0; i < files.length; i++) {
-            setProgress({ i: i + 1, n: files.length });
-            await Promise.resolve(onDropFile(files[i]));
-          }
-        } finally {
-          setProgress(null);
-          setBusy(false);
-        }
-      }}
-      title="Suelta un .mp3 o .srt"
-    >
-      <div className="t">
-        {busy ? "Guardando en librería…" : "Suelta aquí la canción (MP3) o las letras (SRT)"}
-      </div>
-      <div className="s">
-        {busy
-          ? "No cierres la app durante la copia."
-          : "Puedes soltar uno o dos archivos (MP3 + SRT)."}
-      </div>
-
-      {busy && (
-        <div className="busyRow">
-          <Loader />
-          <div className="busyText">
-            {progress ? `Procesando ${progress.i}/${progress.n}` : "Procesando…"}
-          </div>
+          await processFiles(files);
+        }}
+      >
+        <div className="t">
+          {busy ? "Guardando…" : "Suéltalo o haz clic aquí para añadir los archivos (MP3/SRT)"}
         </div>
-      )}
-    </Zone>
+        <div className="s">
+          {busy ? "Por favor no cierres la ventana." : "Puedes seleccionar multiples archivos (.mp3 + .srt)."}
+        </div>
+
+        {busy && (
+          <div className="busyRow">
+            <Loader />
+            <div className="busyText">
+              {progress ? `Processing ${progress.i}/${progress.n}` : "Processing…"}
+            </div>
+          </div>
+        )}
+      </Zone>
+
+      {/* Hidden file picker */}
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        accept=".mp3,.srt,audio/mpeg,text/plain"
+        style={{ display: "none" }}
+        onChange={async (e) => {
+          const files = Array.from(e.target.files ?? []);
+          // reset input so selecting same files again still triggers change
+          e.target.value = "";
+          if (!files.length) return;
+          if (busy) return;
+          await processFiles(files);
+        }}
+      />
+    </>
   );
 }

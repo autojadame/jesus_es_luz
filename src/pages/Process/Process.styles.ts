@@ -6,7 +6,10 @@ export const Wrap = styled.div`
   display: flex;
   flex-direction: column;
   gap: 12px;
-  min-height: calc(100vh - 56px);
+  max-height: calc(100vh - 56px);
+    min-height: calc(100vh - 56px);
+
+    overflow: auto;
 `;
 
 export const Header = styled(Card)`
@@ -84,13 +87,14 @@ export const Item = styled(Card)<{ $open?: boolean }>`
 
   .top {
     display: flex;
-    justify-content: space-between;
-    gap: 10px;
+    width: 100%;
+
     align-items: flex-start;
   }
 
   .left {
     min-width: 0;
+        width: 100%;
   }
 
   .ref {

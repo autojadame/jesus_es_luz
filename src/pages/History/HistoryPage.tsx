@@ -251,7 +251,12 @@ export function HistoryPage() {
                 </Expand>
 
                 <div onClick={(ev) => ev.stopPropagation()}>
-                  <DropZone onDropFile={(file) => onDropForEntry(e, file)} />
+                  <DropZone onDropFile={(file) => {
+                    if(!e.songTitulo){
+                      throw new Error("No se puede guardar el archivo porque no tiene título");
+                    }
+                    return onDropForEntry(e, file)
+                  }} />
                 </div>
               </>
             )}

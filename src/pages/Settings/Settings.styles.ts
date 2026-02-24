@@ -6,7 +6,10 @@ export const Wrap = styled.div`
   display: grid;
   grid-template-columns: 1.2fr 0.8fr;
   gap: 14px;
-  min-height: calc(100vh - 56px);
+  max-height: calc(100vh - 56px);
+    min-height: calc(100vh - 56px);
+
+    overflow: auto;
 `;
 
 export const Panel = styled(Card)`

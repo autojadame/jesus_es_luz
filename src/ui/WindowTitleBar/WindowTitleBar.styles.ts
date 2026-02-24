@@ -1,11 +1,9 @@
 import styled from "styled-components";
 
 export const Bar = styled.div`
-  position: sticky;
-  top: 0;
   z-index: 9999;
 
-  height: 44px;
+  height: 56px;
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAppDispatch, useAppSelector } from "@/app/hooks";
 import { clearProcessBatch } from "@/features/llm/llmSlice";
-import { generateSong } from "@/features/llm/thunks";
+import { generateSong, regenerateSongTitle } from "@/features/llm/thunks"; // ✅
 import { Button } from "@/ui/components/Button";
 import { Loader } from "@/ui/components/Loader";
 import { Toast } from "@/ui/components/Toast";
@@ -27,10 +27,7 @@ import {
 import type { BibleItem } from "@/types/bible";
 import { addLineBreaksAfterDotUpper } from "@/utils/textFormat";
 import type { HistoryEntry } from "@/types/history";
-import {
-  setSavedFileForLatestByPassage,
-  setSavedFileForEntryId,
-} from "@/features/history/historySlice";
+import { setSavedFileForLatestByPassage, setSavedFileForEntryId } from "@/features/history/historySlice";
 
 const STYLE_TAG = "Ballad, New Romanticism";
 
@@ -52,7 +49,6 @@ export function ProcessPage() {
     return processBatchIds.map((id) => map.get(id)).filter(Boolean) as BibleItem[];
   }, [items, processBatchIds.join(",")]);
 
-  // map: latest entry por pasaje (newest first)
   const latestHistoryByPassage = useMemo(() => {
     const m = new Map<number, HistoryEntry>();
     for (const e of historyEntries) {
@@ -61,12 +57,10 @@ export function ProcessPage() {
     return m;
   }, [historyEntries]);
 
-  // si no hay batch, fuera
   useEffect(() => {
     if (!processBatchIds.length) nav("/dashboard", { replace: true });
   }, [processBatchIds.length, nav]);
 
-  // autogeneración (paralela) si no hay nada generado todavía
   const [autoStarted, setAutoStarted] = useState(false);
   useEffect(() => {
     if (!batch.length) return;
@@ -105,7 +99,6 @@ export function ProcessPage() {
   }
 
   async function saveDroppedFileForPassage(passage: BibleItem, songTitle: string, file: File) {
-    // ✅ ruta segura en Electron moderno
     const pthRaw = window.electronAPI.files.getPathForFile(file);
     const pth = pthRaw ? (pthRaw.includes("/") ? pthRaw.replace(/\//g, "\\") : pthRaw) : "";
 
@@ -132,7 +125,6 @@ export function ProcessPage() {
         songTitle,
       });
 
-      // ✅ mejor: actualiza la entry exacta si existe
       if (entry?.entryId) {
         dispatch(
           setSavedFileForEntryId({
@@ -142,7 +134,6 @@ export function ProcessPage() {
           })
         );
       } else {
-        // fallback
         dispatch(
           setSavedFileForLatestByPassage({
             passageId: passage.id,
@@ -165,9 +156,7 @@ export function ProcessPage() {
       <Header>
         <div className="left">
           <div className="t">Generación de letras ({batch.length})</div>
-          <div className="sub">
-            Click en una tarjeta para ver Texto (izq) y Canción (der). Click en la letra para copiar.
-          </div>
+          <div className="sub">Click en una tarjeta para ver Texto (izq) y Canción (der). Click en la letra para copiar.</div>
         </div>
 
         <RightTools>
@@ -194,6 +183,8 @@ export function ProcessPage() {
         const savedMp3 = hist?.saved?.mp3;
         const savedSrt = hist?.saved?.srt;
 
+        const canRegenerateTitle = !!song?.letra && st !== "loading";
+
         return (
           <Item
             key={p.id}
@@ -204,6 +195,9 @@ export function ProcessPage() {
           >
             <div className="top">
               <div className="left">
+                <div style={{display:"flex", justifyContent:"space-between"}}>
+                  <div> 
+
                 <div className="ref">
                   {p.libro} {p.capitulo}:{p.versiculo_inicial}-{p.versiculo_final} • {p.testamento} • ID {p.id}
                 </div>
@@ -225,7 +219,6 @@ export function ProcessPage() {
                     <span style={{ color: "rgba(255,77,109,0.95)" }}>{errById[p.id]}</span>
                   ) : null}
 
-                  {/* ✅ indicadores de guardado */}
                   {savedMp3 ? (
                     <Chip
                       $tone="ok"
@@ -254,12 +247,20 @@ export function ProcessPage() {
                     </Chip>
                   ) : null}
                 </div>
-
-                <div className="sumTitle">{sum?.titulo ?? "—"}</div>
-                <div className="sumDesc">{sum?.descripcion ?? "—"}</div>
-              </div>
-
+                  </div>
               <RightTools onClick={(ev) => ev.stopPropagation()}>
+                <Button
+                  $variant="ghost"
+                  disabled={!canRegenerateTitle}
+                  onClick={() => {
+                    setToast("Regenerando título…");
+                    dispatch<any>(regenerateSongTitle(p.id));
+                  }}
+                  title={!song?.letra ? "Primero genera la letra" : "Regenerar SOLO el título"}
+                >
+                  Nuevo título
+                </Button>
+
                 <Button
                   $variant="ghost"
                   onClick={() => dispatch<any>(generateSong(p, sum))}
@@ -268,6 +269,13 @@ export function ProcessPage() {
                   Regenerar
                 </Button>
               </RightTools>
+                </div>
+
+
+                <div className="sumTitle">{sum?.titulo ?? "—"}</div>
+                <div className="sumDesc">{sum?.descripcion ?? "—"}</div>
+              </div>
+
             </div>
 
             {open && (
@@ -286,10 +294,7 @@ export function ProcessPage() {
                     <CopyRow>
                       <CopyField>
                         <CopyLabel>Título</CopyLabel>
-                        <CopyInputWrap
-                          onClick={() => songTitle && copyToClipboard(songTitle)}
-                          title="Click para copiar"
-                        >
+                        <CopyInputWrap onClick={() => songTitle && copyToClipboard(songTitle)} title="Click para copiar">
                           <CopyInput readOnly value={songTitle} placeholder="(aún no generado)" />
                           <CopyIcon />
                         </CopyInputWrap>
@@ -321,17 +326,16 @@ export function ProcessPage() {
                   </Col>
                 </Expand>
 
-                {/* ✅ Drop area ocupa toda la tarjeta debajo de las 2 columnas */}
                 <div onClick={(ev) => ev.stopPropagation()}>
                   <DropZone
                     onDropFile={(file) => {
                       if (!songTitle) {
                         setToast("Primero genera la letra para tener título.");
-                        return;
+                        return Promise.resolve();
                       }
-                      // DropZone puede llamar 2 veces (mp3 + srt); guardamos ambos
-                      saveDroppedFileForPassage(p, songTitle, file);
+                      return saveDroppedFileForPassage(p, songTitle, file);
                     }}
+                    onInfo={(m) => setToast(m)}
                   />
                 </div>
               </>

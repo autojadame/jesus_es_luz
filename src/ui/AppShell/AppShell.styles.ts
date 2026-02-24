@@ -66,6 +66,7 @@ export const Main = styled.main`
   min-width: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 `;
 
 export const TopBar = styled.div`

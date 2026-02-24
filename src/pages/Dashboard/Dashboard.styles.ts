@@ -8,7 +8,7 @@ export const Wrap = styled.div`
     grid-template-rows: auto 1fr auto;
     gap: 14px;
     max-height: calc(100vh - 56px);
-        min-height: calc(100vh - 56px);
+    min-height: calc(100vh - 56px);
 
     overflow: auto;
 `;

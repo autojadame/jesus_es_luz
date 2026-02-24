@@ -9,6 +9,7 @@ import log from "electron-log";
 // import MenuBuilder from "./menu";
 import { resolveHtmlPath } from "./util";
 import { DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL } from "./constants";
+import { saveToLibrary, copyToDownloads } from "./libraryExport";
 
 class AppUpdater {
   constructor() {
@@ -189,6 +190,13 @@ ipcMain.on("window:dragMove", (_evt, payload: { screenX: number; screenY: number
   mainWindow.setPosition(x, y, false);
 });
 
+ipcMain.handle("library:saveToLibrary", async (_evt, payload) => {
+  return await saveToLibrary(payload);
+});
+
+ipcMain.handle("library:copyToDownloads", async (_evt, payload) => {
+  return await copyToDownloads(payload);
+});
 ipcMain.on("window:dragEnd", () => {
   dragState = null;
 });
