@@ -1,6 +1,6 @@
 {
-  "name": "electron-react-boilerplate",
-  "description": "A foundation for scalable desktop apps",
+  "name": "alabanzas-cristo",
+  "description": "Herramienta para la generación de alabanzas cristianas",
   "keywords": [
     "electron",
     "boilerplate",
@@ -22,15 +22,15 @@
   },
   "license": "MIT",
   "author": {
-    "name": "Electron React Boilerplate Maintainers",
-    "email": "electronreactboilerplate@gmail.com",
-    "url": "https://electron-react-boilerplate.js.org"
+    "name": "DefinitelyABot",
+    "email": "autojadame@gmail.com",
+    "url": "https://github.com/autojadame"
   },
   "contributors": [
     {
-      "name": "Amila Welihinda",
-      "email": "amilajack@gmail.com",
-      "url": "https://github.com/amilajack"
+      "name": "DefinitelyABot",
+      "email": "autojadame@gmail.com",
+      "url": "https://github.com/autojadame"
     }
   ],
   "main": "./.erb/dll/main.bundle.dev.js",
@@ -102,12 +102,15 @@
   },
   "dependencies": {
     "@electron/notarize": "^3.0.0",
+    "@reduxjs/toolkit": "^2.11.2",
     "electron-debug": "^4.1.0",
     "electron-log": "^5.3.2",
     "electron-updater": "^6.3.9",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router-dom": "^7.3.0"
+    "react-redux": "^9.2.0",
+    "react-router-dom": "^7.3.0",
+    "styled-components": "^6.3.11"
   },
   "devDependencies": {
     "@electron/rebuild": "^3.7.1",
@@ -175,8 +178,8 @@
     "webpack-merge": "^6.0.1"
   },
   "build": {
-    "productName": "ElectronReact",
-    "appId": "org.erb.ElectronReact",
+    "productName": "AlabanzasCristo",
+    "appId": "org.alabanzas-cristo.app",
     "asar": true,
     "afterSign": ".erb/scripts/notarize.js",
     "asarUnpack": "**\\*.{node,dll}",
@@ -235,8 +238,9 @@
     ],
     "publish": {
       "provider": "github",
-      "owner": "electron-react-boilerplate",
-      "repo": "electron-react-boilerplate"
+      "owner": "autojadame",
+      "repo": "jesus_es_luz",
+      "private": true
     }
   },
   "collective": {

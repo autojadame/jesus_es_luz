@@ -1,38 +1,37 @@
-const { notarize } = require('@electron/notarize');
-const { build } = require('../../package.json');
+/* eslint global-require: off, no-console: off */
 
-exports.default = async function notarizeMacos(context) {
-  const { electronPlatformName, appOutDir } = context;
-  if (electronPlatformName !== 'darwin') {
+'use strict';
+
+module.exports = async function notarizeApp(context) {
+  // ✅ Notarize solo aplica en macOS
+  if (process.platform !== 'darwin') return;
+  if (!context || context.electronPlatformName !== 'darwin') return;
+
+  // ✅ Import dinámico: evita require() de un ESM
+  const { notarize } = await import('@electron/notarize');
+
+  const { appOutDir, packager } = context;
+  const appName = packager.appInfo.productFilename;
+
+  // Variables típicas para notarización (ajusta a tu setup)
+  const appleId = process.env.APPLE_ID;
+  const appleIdPassword = process.env.APPLE_ID_PASSWORD; // app-specific password
+  const teamId = process.env.APPLE_TEAM_ID;
+
+  if (!appleId || !appleIdPassword) {
+    console.log('[notarize] APPLE_ID / APPLE_ID_PASSWORD no configurados. Saltando notarización.');
     return;
   }
 
-  if (process.env.CI !== 'true') {
-    console.warn('Skipping notarizing step. Packaging is not running in CI');
-    return;
-  }
-
-  if (
-    !(
-      'APPLE_ID' in process.env &&
-      'APPLE_ID_PASS' in process.env &&
-      'APPLE_TEAM_ID' in process.env
-    )
-  ) {
-    console.warn(
-      'Skipping notarizing step. APPLE_ID, APPLE_ID_PASS, and APPLE_TEAM_ID env variables must be set',
-    );
-    return;
-  }
-
-  const appName = context.packager.appInfo.productFilename;
+  console.log('[notarize] Notarizando…', appName);
 
   await notarize({
-    tool: 'notarytool',
-    appBundleId: build.appId,
-    appPath: `${appOutDir}/${appName}.app`,
-    appleId: process.env.APPLE_ID,
-    appleIdPassword: process.env.APPLE_ID_PASS,
-    teamId: process.env.APPLE_TEAM_ID,
+    appBundleId: packager.appInfo.id,
+    appPath: `${appOutDir}\\${appName}.app`,
+    appleId,
+    appleIdPassword,
+    teamId,
   });
+
+  console.log('[notarize] OK');
 };

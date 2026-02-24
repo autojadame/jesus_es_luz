@@ -1,9 +1,19 @@
 {
   "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "src/*"
+      ]
+    },
     "incremental": true,
     "target": "es2022",
     "module": "node16",
-    "lib": ["dom", "es2022"],
+    "lib": [
+      "dom",
+      "es2022"
+    ],
+    "noImplicitAny": false,
     "jsx": "react-jsx",
     "strict": true,
     "sourceMap": true,
@@ -14,5 +24,10 @@
     "allowJs": true,
     "outDir": ".erb/dll"
   },
-  "exclude": ["test", "release/build", "release/app/dist", ".erb/dll"]
+  "exclude": [
+    "test",
+    "release/build",
+    "release/app/dist",
+    ".erb/dll"
+  ]
 }
