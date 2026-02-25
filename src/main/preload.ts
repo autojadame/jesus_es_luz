@@ -27,6 +27,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   clipboard: {
     writeText: (text: string) => ipcRenderer.invoke('clipboard:writeText', text),
   },
+  nas: {
+    getRoot: () => ipcRenderer.invoke("nas:getRoot"),
+    setRoot: (payload: { root: string }) => ipcRenderer.invoke("nas:setRoot", payload),
+    check: (payload: { root: string }) => ipcRenderer.invoke("nas:check", payload),
+  },
   deepseek: {
     chat: (payload: any) => ipcRenderer.invoke('deepseek:chat', payload),
   },

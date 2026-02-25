@@ -9,7 +9,7 @@ import log from "electron-log";
 // import MenuBuilder from "./menu";
 import { resolveHtmlPath } from "./util";
 import { DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL } from "./constants";
-import { saveToLibrary, copyToDownloads } from "./libraryExport";
+import { saveToLibrary, copyToDownloads, getNasRoot, setNasRoot, checkNasRoot } from "./libraryExport";
 
 class AppUpdater {
   constructor() {
@@ -26,7 +26,20 @@ ipcMain.on("ipc-example", async (event, arg) => {
   console.log(msgTemplate(arg));
   event.reply("ipc-example", msgTemplate("pong"));
 });
+ipcMain.handle("nas:getRoot", async () => {
+  const root = await getNasRoot();
+  return { root };
+});
 
+ipcMain.handle("nas:setRoot", async (_evt, payload: { root: string }) => {
+  const root = await setNasRoot(String(payload?.root ?? ""));
+  return { root };
+});
+
+ipcMain.handle("nas:check", async (_evt, payload: { root: string }) => {
+  const root = String(payload?.root ?? "").trim();
+  return await checkNasRoot(root);
+});
 if (process.env.NODE_ENV === "production") {
   const sourceMapSupport = require("source-map-support");
   sourceMapSupport.install();
