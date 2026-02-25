@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { useAppDispatch, useAppSelector } from "@/app/hooks";
-import { selectItems, selectStartIndex } from "@/features/settings/selectors";
-import { setItems, setStartIndex } from "@/features/settings/settingsSlice";
+import { selectDiscardedIds, selectItems, selectStartIndex } from "@/features/settings/selectors";
+import { clearDiscardedIds, setItems, setStartIndex } from "@/features/settings/settingsSlice";
 import { validateBibleJson } from "@/features/settings/validators";
 import { prettyJson } from "@/utils/json";
 import { Button } from "@/ui/components/Button";
@@ -52,6 +52,7 @@ export function SettingsPage() {
               if (!validation.ok) return;
               dispatch(setItems(validation.items));
               dispatch(setStartIndex(Math.max(0, idxNum)));
+              dispatch(clearDiscardedIds());
             }}
           >
             Guardar

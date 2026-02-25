@@ -18,6 +18,7 @@ import {
   SongCopyBox,
 } from "@/pages/Process/Process.styles";
 import { addLineBreaksAfterDotUpper } from "@/utils/textFormat";
+import { clearDiscardedIds } from "@/features/settings/settingsSlice";
 
 const STYLE_TAG = "Ballad, New Romanticism";
 
@@ -147,7 +148,10 @@ export function HistoryPage() {
 
         <RightTools>
           <div style={{ fontSize: 12, opacity: 0.72 }}>{count} entradas</div>
-          <Button $variant="danger" disabled={count === 0} onClick={() => dispatch(clearHistory())}>
+          <Button $variant="danger" disabled={count === 0} onClick={() => {
+            dispatch(clearHistory())
+            dispatch(clearDiscardedIds())
+          }}>
             Borrar todo
           </Button>
         </RightTools>

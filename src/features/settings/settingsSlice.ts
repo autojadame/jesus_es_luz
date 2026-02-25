@@ -35,6 +35,9 @@ const settingsSlice = createSlice({
     restoreId(state, action: PayloadAction<number>) {
       state.discardedIds = state.discardedIds.filter((x) => x !== action.payload);
     },
+    clearDiscardedIds(state) {
+      state.discardedIds = [];
+    },
     updateText(state, action: PayloadAction<{ id: number; texto: string }>) {
       const it = state.items.find((x) => x.id === action.payload.id);
       if (it) it.texto = action.payload.texto;
@@ -42,5 +45,5 @@ const settingsSlice = createSlice({
   },
 });
 
-export const { setItems, setStartIndex, discardId, restoreId, updateText } = settingsSlice.actions;
+export const { setItems, setStartIndex, discardId, restoreId, clearDiscardedIds, updateText } = settingsSlice.actions;
 export default settingsSlice.reducer;
