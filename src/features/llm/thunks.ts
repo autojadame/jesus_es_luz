@@ -74,6 +74,147 @@ async function checkTitleAvailableOnNas(params: {
   }
 }
 
+/**
+ * ✅ Validador de estructura para letras con etiquetas [..]
+ * - Etiquetas obligatorias: [Verse 1], [Verse 2], [Pre-Chorus], [Bridge], al menos 2 [Chorus]
+ * - Debe empezar por [Verse 1]
+ * - Debe haber >=1 [Chorus] antes de [Bridge] y >=1 [Chorus] después de [Bridge]
+ * - [Outro] opcional, solo al final
+ * - Solo se permiten etiquetas: Verse 1/2/3, Pre-Chorus, Chorus, Bridge, Outro
+ * - Ninguna sección vacía
+ */
+type LyricsValidation = { ok: true } | { ok: false; reason: string };
+
+const HEADING_RE = /^\[(Verse 1|Verse 2|Verse 3|Pre-Chorus|Chorus|Bridge|Outro)\]$/;
+const ALLOWED_HEADINGS = new Set([
+  "[Verse 1]",
+  "[Verse 2]",
+  "[Verse 3]",
+  "[Pre-Chorus]",
+  "[Chorus]",
+  "[Bridge]",
+  "[Outro]",
+]);
+
+function validateLyricsStructure(letra: string): LyricsValidation {
+  const raw = String(letra ?? "").replace(/\r\n/g, "\n").trim();
+  if (!raw) return { ok: false, reason: "La letra está vacía." };
+
+  const lines = raw.split("\n").map((l) => l.trim());
+  const nonEmpty = lines.filter(Boolean);
+  if (nonEmpty.length < 16) return { ok: false, reason: "La letra es demasiado corta." };
+
+  const headings: Array<{ h: string; line: number }> = [];
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (!l) continue;
+    if (l.startsWith("[") && l.endsWith("]")) {
+      if (!HEADING_RE.test(l)) {
+        return {
+          ok: false,
+          reason: `Etiqueta inválida '${l}'. Solo se permiten: [Verse 1],[Verse 2],[Verse 3],[Pre-Chorus],[Chorus],[Bridge],[Outro].`,
+        };
+      }
+      if (!ALLOWED_HEADINGS.has(l)) {
+        return { ok: false, reason: `Etiqueta no permitida: ${l}` };
+      }
+      headings.push({ h: l, line: i });
+    }
+  }
+
+  if (!headings.length) return { ok: false, reason: "No hay etiquetas de sección entre corchetes." };
+  if (headings[0].h !== "[Verse 1]") return { ok: false, reason: "La letra debe empezar por [Verse 1]." };
+
+  const hasV2 = headings.some((x) => x.h === "[Verse 2]");
+  const hasPre = headings.some((x) => x.h === "[Pre-Chorus]");
+  const hasBridge = headings.some((x) => x.h === "[Bridge]");
+  if (!hasV2) return { ok: false, reason: "Falta [Verse 2]." };
+  if (!hasPre) return { ok: false, reason: "Falta [Pre-Chorus]." };
+  if (!hasBridge) return { ok: false, reason: "Falta [Bridge]." };
+
+  const chorusLines = headings.filter((x) => x.h === "[Chorus]").map((x) => x.line);
+  if (chorusLines.length < 2) return { ok: false, reason: "Debe haber al menos 2 secciones [Chorus]." };
+
+  const bridgeLine = headings.find((x) => x.h === "[Bridge]")!.line;
+  const chorusBeforeBridge = chorusLines.some((ln) => ln < bridgeLine);
+  const chorusAfterBridge = chorusLines.some((ln) => ln > bridgeLine);
+  if (!chorusBeforeBridge) return { ok: false, reason: "Debe haber al menos 1 [Chorus] antes de [Bridge]." };
+  if (!chorusAfterBridge) {
+    return { ok: false, reason: "Debe haber al menos 1 [Chorus] después de [Bridge] (cierre final)." };
+  }
+
+  // Orden mínimo profesional: Verse1 < Pre-Chorus < Chorus < Verse2
+  const idxVerse1 = headings.find((x) => x.h === "[Verse 1]")!.line;
+  const idxPre = headings.find((x) => x.h === "[Pre-Chorus]")!.line;
+  const idxCh1 = chorusLines[0];
+  const idxVerse2 = headings.find((x) => x.h === "[Verse 2]")!.line;
+  if (!(idxVerse1 < idxPre && idxPre < idxCh1 && idxCh1 < idxVerse2)) {
+    return {
+      ok: false,
+      reason:
+        "Orden mínimo inválido. Debe seguir: [Verse 1] → [Pre-Chorus] → [Chorus] → [Verse 2] (en ese orden).",
+    };
+  }
+
+  // Última sección: [Chorus] o [Outro]
+  const lastH = headings[headings.length - 1].h;
+  if (lastH !== "[Chorus]" && lastH !== "[Outro]") {
+    return { ok: false, reason: "La última sección debe ser [Chorus] o [Outro]." };
+  }
+  if (lastH === "[Outro]") {
+    // Outro solo al final y después del último chorus
+    const lastCh = chorusLines[chorusLines.length - 1];
+    const outroLine = headings[headings.length - 1].line;
+    if (!(lastCh < outroLine)) return { ok: false, reason: "Si hay [Outro], debe ir al final tras el último [Chorus]." };
+  }
+
+  // Secciones no vacías
+  for (let i = 0; i < headings.length; i++) {
+    const start = headings[i].line;
+    const end = i + 1 < headings.length ? headings[i + 1].line : lines.length;
+    const chunk = lines.slice(start + 1, end).filter((x) => x && !HEADING_RE.test(x));
+    if (chunk.length === 0) return { ok: false, reason: `La sección ${headings[i].h} está vacía.` };
+  }
+
+  return { ok: true };
+}
+
+/**
+ * ✅ Prompt NUEVO: etiquetas [..] + estructura profesional flexible
+ * - Outro opcional
+ * - mínimo 2 Chorus, y uno debe ir tras el Bridge
+ */
+const SONG_PROMPT_BASE = `
+Quiero que compongas una letra ORIGINAL en español, “lista para grabar”, estilo balada worship cristiano (70–90 BPM), íntima, emotiva y profesional.
+
+Estilo (muy importante):
+- Cadencia y enfoque narrativo como una balada moderna: versos largos, imágenes concretas, emoción progresiva (fragilidad → consuelo → confianza).
+- Rima suave/asonante y frases muy cantables (sin trabalenguas, sin rimas forzadas).
+- Lenguaje moderno y reverente, sin exceso de jerga evangélica.
+- PROHIBIDO usar “Jehová”. Usa principalmente “Señor” y “Padre” (puedes usar “Dios”, “Cristo”, “Salvador” con coherencia).
+- No copies textos bíblicos literales.
+
+FORMATO OBLIGATORIO (etiquetas EXACTAS, entre [] y en una línea sola):
+- Debe empezar por [Verse 1].
+- Debe incluir: [Verse 2], [Pre-Chorus], [Bridge] y al menos 2 bloques [Chorus].
+- Debe haber al menos 1 [Chorus] ANTES de [Bridge] y al menos 1 [Chorus] DESPUÉS de [Bridge].
+- Etiquetas permitidas (NO uses otras):
+  [Verse 1]
+  [Verse 2]
+  [Verse 3]   (opcional)
+  [Pre-Chorus]
+  [Chorus]
+  [Bridge]
+  [Outro]     (opcional, solo al final)
+
+Estructura profesional recomendada (flexible, pero coherente):
+[Verse 1] → [Pre-Chorus] → [Chorus] → [Verse 2] → (opcional [Pre-Chorus]) → [Chorus] → [Bridge] → [Chorus] → (opcional [Outro])
+
+Reglas adicionales:
+- Cada sección debe tener letra debajo (no dejes secciones vacías).
+- No escribas explicaciones. Dentro del campo "letra" entrega SOLO la letra con sus etiquetas (sin markdown, sin backticks).
+`.trim();
+
 async function llmGenerateUniqueTitle(args: {
   passageId: number;
   version: VersionKey;
@@ -203,71 +344,88 @@ export function fetchSummaries(batch: BibleItem[]) {
   };
 }
 
-const SONG_PROMPT_BASE = `Escribe una letra original en español, estilo balada worship cristiano, emocional, íntima y profesional, con rima suave y cantable, Letra original de adoración, inspirada en fe cristiana, no basada en textos bíblicos literales. Estructura obligatoria: Estrofa 1, Estrofa 2, Pre-chorus, Estribillo, Estrofa 3, Pre-chorus 2, Estribillo, Bridge, Estribillo final. Mantén un lenguaje moderno pero reverente, imágenes poéticas, progresión emocional (de fragilidad a esperanza), y evita clichés repetidos. Longitud aproximada: 3–4 min.
-Prompt completo (control total, mejores resultados)
-Quiero que compongas una letra original en español, con calidad “lista para grabar”, estilo balada (70–90 BPM), worship cristiano. Requisitos: Prohibido usar “Jehová”. Usa “Señor”, “Dios”, “Cristo”, “Salvador”, “Padre”, “Altísimo” (elige con coherencia, sin mezclar por mezclar).
-Estructura exacta:
-ESTROFA 1 (4 líneas)
-ESTROFA 2 (4 líneas)
-PRE-CHORUS (4 líneas, subiendo tensión emocional)
-ESTRIBILLO (8 líneas, muy melódico y memorable)
-ESTROFA 3 (4 líneas, más esperanzada)
-PRE-CHORUS 2 (4 líneas, variación del anterior)
-ESTRIBILLO (repetición igual o con 1–2 ajustes)
-BRIDGE (8 líneas, clímax emocional, sigue siendo balada)
-ESTRIBILLO FINAL (8 líneas, resolución y descanso)
-Estilo: íntimo, cinematográfico y humano (fragilidad real → consuelo → confianza).
-Rima: suave pero consistente (no forzada), frases cantables, sin trabalenguas.
-Lenguaje: moderno, reverente, sin términos excesivamente evangélicos; evita clichés (“en victoria”, “romper cadenas” salvo que lo uses con originalidad).
-Recursos: metáforas de luz/sombra, hogar, abrazo, camino, amanecer, silencio, pero muy importante que no las uses en todas las letras de las canciones, sino con imágenes nuevas.
-Entrega: solo la letra con títulos de secciones, sin explicación`;
-
 export function generateSong(p: BibleItem, summary?: { titulo?: string; descripcion?: string }) {
   return async (dispatch: AppDispatch, getState: () => RootState) => {
     dispatch(songStart(p.id));
     try {
-      const user = [
-        SONG_PROMPT_BASE,
-        ``,
-        `Inspiración (NO literal):`,
-        `- Referencia: ${p.libro} ${p.capitulo}:${p.versiculo_inicial}-${p.versiculo_final}`,
-        `- Testamento: ${p.testamento}`,
-        summary?.titulo ? `- Título/tema: ${summary.titulo}` : ``,
-        summary?.descripcion ? `- Resumen: ${summary.descripcion}` : ``,
-        ``,
-        `Devuelve SOLO JSON OBJETO con este formato:`,
-        `{ "id": ${p.id}, "titulo_v1": "título corto", "titulo_v2": "título corto", "letra": "LETRA COMPLETA CON SECCIONES" }`,
-        `Reglas de títulos:`,
-        `- 2 a 6 palabras, sin comillas.`,
-        `- V1 y V2 deben ser distintos entre sí.`,
-      ]
-        .filter(Boolean)
-        .join("\n");
+      const st0 = getState();
+      const s0 = st0.llm.summariesById[p.id];
 
-      const resp = await window.electronAPI.deepseek.chat({
-        model: "deepseek-reasoner",
-        messages: [
-          { role: "system", content: sysJsonOnly() },
-          { role: "user", content: user },
-        ],
-        max_tokens: 4096,
-        temperature: 0.8,
-      });
+      // ✅ Persistir histórico (necesitamos entryId para reservar carpeta)
+      const createdAt = Date.now();
+      const entryId = `${p.id}-${createdAt}-${Math.random().toString(16).slice(2)}`;
 
-      const objText = extractJsonObject(resp.content);
-      const parsedRaw = JSON.parse(objText) as any;
+      // ✅ Generación LLM con reintentos si la estructura de letra no cumple
+      const MAX_LYRICS_RETRIES = 4;
+      let lastReason = "";
+      let parsedRaw: any = null;
+
+      for (let attempt = 1; attempt <= MAX_LYRICS_RETRIES; attempt++) {
+        const user = [
+          SONG_PROMPT_BASE,
+          ``,
+          `Inspiración (NO literal):`,
+          `- Referencia: ${p.libro} ${p.capitulo}:${p.versiculo_inicial}-${p.versiculo_final}`,
+          `- Testamento: ${p.testamento}`,
+          summary?.titulo ? `- Título/tema: ${summary.titulo}` : s0?.titulo ? `- Título/tema: ${s0.titulo}` : ``,
+          summary?.descripcion
+            ? `- Resumen: ${summary.descripcion}`
+            : s0?.descripcion
+              ? `- Resumen: ${s0.descripcion}`
+              : ``,
+          ``,
+          attempt > 1
+            ? `IMPORTANTE: El intento anterior fue RECHAZADO por: ${lastReason || "estructura inválida"}. Corrige y cumple ESTRICTAMENTE el FORMATO OBLIGATORIO.`
+            : ``,
+          ``,
+          `Devuelve SOLO JSON OBJETO con este formato:`,
+          `{ "id": ${p.id}, "titulo_v1": "título corto", "titulo_v2": "título corto", "letra": "LETRA COMPLETA CON ETIQUETAS" }`,
+          `Reglas de títulos:`,
+          `- 2 a 6 palabras, sin comillas.`,
+          `- V1 y V2 deben ser distintos entre sí.`,
+        ]
+          .filter(Boolean)
+          .join("\n");
+
+        const resp = await window.electronAPI.deepseek.chat({
+          model: "deepseek-reasoner",
+          messages: [
+            { role: "system", content: sysJsonOnly() },
+            { role: "user", content: user },
+          ],
+          max_tokens: 4096,
+          temperature: 0.8,
+        });
+
+        const objText = extractJsonObject(resp.content);
+        const candidate = JSON.parse(objText) as any;
+
+        const letra = String(candidate?.letra ?? "").trim();
+        const v = validateLyricsStructure(letra);
+        if (!v.ok) {
+          lastReason = v.reason;
+          continue;
+        }
+
+        // ok
+        parsedRaw = candidate;
+        break;
+      }
+
+      if (!parsedRaw) {
+        throw new Error(
+          `No se pudo generar una letra válida con las etiquetas requeridas tras ${MAX_LYRICS_RETRIES} intentos. Último motivo: ${lastReason}`
+        );
+      }
 
       let tituloV1 = String(parsedRaw?.titulo_v1 ?? parsedRaw?.titulo ?? "").trim();
       let tituloV2 = String(parsedRaw?.titulo_v2 ?? "").trim();
       const letra = String(parsedRaw?.letra ?? "").trim();
 
-      // ✅ Persistir histórico (necesitamos entryId para reservar carpeta)
+      // ✅ si la IA no devuelve 2 títulos válidos/diferentes, los regeneramos aquí
       const st = getState();
       const s = st.llm.summariesById[p.id];
-      const createdAt = Date.now();
-      const entryId = `${p.id}-${createdAt}-${Math.random().toString(16).slice(2)}`;
 
-      // ✅ si la IA no devuelve 2 títulos válidos/diferentes, los regeneramos aquí
       const banned = new Set<string>();
       for (const h of (st.history.entries as any) ?? []) {
         const t1 = String(h?.songTituloV1 ?? h?.songTitulo ?? "").trim();
@@ -301,7 +459,11 @@ export function generateSong(p: BibleItem, summary?: { titulo?: string; descripc
       banned.add(normTitle(tituloV1));
 
       // V2
-      if (!isReasonableTitle(tituloV2) || normTitle(tituloV2) === normTitle(tituloV1) || banned.has(normTitle(tituloV2))) {
+      if (
+        !isReasonableTitle(tituloV2) ||
+        normTitle(tituloV2) === normTitle(tituloV1) ||
+        banned.has(normTitle(tituloV2))
+      ) {
         tituloV2 = await llmGenerateUniqueTitle({
           passageId: p.id,
           version: "v2",
@@ -496,9 +658,10 @@ export function regenerateSongTitleForEntry(payload: {
       // evita que v1=v2 dentro de la misma entrada
       const entry = (st0.history.entries as any)?.find((x: any) => x.entryId === payload.entryId);
       if (entry) {
-        const other = payload.version === "v1"
-          ? String(entry?.songTituloV2 ?? "").trim()
-          : String(entry?.songTituloV1 ?? entry?.songTitulo ?? "").trim();
+        const other =
+          payload.version === "v1"
+            ? String(entry?.songTituloV2 ?? "").trim()
+            : String(entry?.songTituloV1 ?? entry?.songTitulo ?? "").trim();
         if (other) banned.add(normTitle(other));
       }
 

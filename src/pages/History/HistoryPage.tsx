@@ -35,7 +35,7 @@ type SavedVersions = {
 
 const STYLE_TAGS: Record<VersionKey, string> = {
   v1: "Ballad, New Romanticism",
-  v2: "Cinematic Modern Worship Pop",
+  v2: "Ballad, New Romanticism",
 };
 
 function normalizeSaved(saved: any): SavedVersions {
@@ -86,7 +86,7 @@ async function ensureTitleAvailableOrRegenerate(opts: {
 
     opts.setToast(`Título ${opts.version.toUpperCase()} ocupado en la carpeta de hoy. Regenerando…`);
 
-    const newTitle = await opts.dispatch<any>(
+    const newTitle = await opts.dispatch(
       regenerateSongTitleForEntry({
         entryId,
         passageId: entry.passageId,

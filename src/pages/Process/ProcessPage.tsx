@@ -519,7 +519,7 @@ export function ProcessPage() {
                       </div>
                     ) : song ? (
                       <SongCopyBox
-                        onClick={() => copyToClipboard(`V1: ${t1}\nV2: ${t2}\n\n${song.letra}`)}
+                        onClick={() => copyToClipboard(song.letra)}
                         title="Click para copiar (títulos + letra)"
                       >
                         <div className="pre">{song.letra}</div>
