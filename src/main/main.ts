@@ -9,7 +9,14 @@ import log from "electron-log";
 // import MenuBuilder from "./menu";
 import { resolveHtmlPath } from "./util";
 import { DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL } from "./constants";
-import { saveToLibrary, copyToDownloads, getNasRoot, setNasRoot, checkNasRoot } from "./libraryExport";
+import {
+  saveToLibrary,
+  copyToDownloads,
+  getNasRoot,
+  setNasRoot,
+  checkNasRoot,
+  checkSongTitleAvailability,
+} from "./libraryExport";
 
 class AppUpdater {
   constructor() {
@@ -205,6 +212,10 @@ ipcMain.on("window:dragMove", (_evt, payload: { screenX: number; screenY: number
 
 ipcMain.handle("library:saveToLibrary", async (_evt, payload) => {
   return await saveToLibrary(payload);
+});
+
+ipcMain.handle("library:checkSongTitle", async (_evt, payload) => {
+  return await checkSongTitleAvailability(payload);
 });
 
 ipcMain.handle("library:copyToDownloads", async (_evt, payload) => {

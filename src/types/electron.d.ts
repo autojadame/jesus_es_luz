@@ -43,6 +43,7 @@ declare global {
           sourcePath: string;
           createdAt: number;
           songTitle: string;
+          entryId: string;
         }) => Promise<{ destPath: string }>;
 
         copyToDownloads: (payload: {

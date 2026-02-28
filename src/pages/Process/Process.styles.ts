@@ -75,10 +75,17 @@ export const Chip = styled.div<{ $tone?: "ok" | "bad" | "neutral" }>`
       : "rgba(255,255,255,0.06)"};
 `;
 
-export const Item = styled(Card)<{ $open?: boolean }>`
+export const Item = styled(Card)<{ $open?: boolean; $complete?: boolean }>`
   padding: 12px;
   cursor: pointer;
   user-select: none;
+
+  opacity: ${({ $complete }) => ($complete ? 0.58 : 1)};
+  transition: opacity 0.18s ease, filter 0.18s ease, border-color 0.18s ease;
+
+  &:hover {
+    opacity: ${({ $complete }) => ($complete ? 0.72 : 1)};
+  }
 
   border-color: ${({ $open }) =>
     $open ? "rgba(124,92,255,0.55)" : "rgba(255,255,255,0.10)"};

@@ -1,12 +1,21 @@
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
 import type { PassageSummary, SongResult } from "@/types/llm";
 
+type SongResult2 = SongResult & {
+  /**
+   * ✅ V2 title (compat: mantenemos `titulo` como V1)
+   */
+  tituloV2?: string;
+};
+
+type VersionKey = "v1" | "v2";
+
 type LlmState = {
   summariesById: Record<number, PassageSummary>;
   summariesLoading: boolean;
   summariesError?: string;
 
-  songsById: Record<number, SongResult>;
+  songsById: Record<number, SongResult2>;
   songsStatusById: Record<number, "idle" | "loading" | "done" | "error">;
   songsErrorById: Record<number, string | undefined>;
 
@@ -14,9 +23,9 @@ type LlmState = {
   processBatchIds: number[];
 
 
-  // dentro de LlmState
-  songTitleStatusById: Record<number, "idle" | "loading" | "done" | "error">;
-  songTitleErrorById: Record<number, string | undefined>;
+  // ✅ estado opcional para regenerar títulos (por versión)
+  songTitleStatusById: Record<string, "idle" | "loading" | "done" | "error">;
+  songTitleErrorById: Record<string, string | undefined>;
   usedTitlesGlobal: string[]; // cache global (normalizado)
   usedTitlesByPassage: Record<number, string[]>; // cache por pasaje (normalizado)
 };
@@ -60,7 +69,7 @@ const llmSlice = createSlice({
       state.songsStatusById[id] = "loading";
       state.songsErrorById[id] = undefined;
     },
-    songSuccess(state, action: PayloadAction<SongResult>) {
+    songSuccess(state, action: PayloadAction<SongResult2>) {
       const id = action.payload.id;
       state.songsById[id] = action.payload;
       state.songsStatusById[id] = "done";
@@ -81,19 +90,25 @@ const llmSlice = createSlice({
     clearProcessBatch(state) {
       state.processBatchIds = [];
     },
-    songTitleStart(state, action: PayloadAction<{ passageId: number }>) {
-      state.songTitleStatusById[action.payload.passageId] = "loading";
-      state.songTitleErrorById[action.payload.passageId] = undefined;
+    songTitleStart(state, action: PayloadAction<{ passageId: number; version: VersionKey }>) {
+      const k = `${action.payload.passageId}:${action.payload.version}`;
+      state.songTitleStatusById[k] = "loading";
+      state.songTitleErrorById[k] = undefined;
     },
-    songTitleSuccess(state, action: PayloadAction<{ passageId: number; title: string; norm: string }>) {
-      const { passageId, title, norm } = action.payload;
-      state.songTitleStatusById[passageId] = "done";
-      state.songTitleErrorById[passageId] = undefined;
+    songTitleSuccess(
+      state,
+      action: PayloadAction<{ passageId: number; version: VersionKey; title: string; norm: string }>
+    ) {
+      const { passageId, version, title, norm } = action.payload;
+      const k = `${passageId}:${version}`;
+      state.songTitleStatusById[k] = "done";
+      state.songTitleErrorById[k] = undefined;
 
       // ✅ actualiza solo el título en songsById (si existe)
       const cur = state.songsById?.[passageId];
-      if (!cur) return;        // ✅ no inventes una canción incompleta
-      cur.titulo = title;
+      if (!cur) return; // ✅ no inventes una canción incompleta
+      if (version === "v1") cur.titulo = title as any;
+      else (cur as any).tituloV2 = title;
 
       // ✅ cache global
       if (!state.usedTitlesGlobal.includes(norm)) state.usedTitlesGlobal.push(norm);
@@ -104,9 +119,10 @@ const llmSlice = createSlice({
         state.usedTitlesByPassage[passageId].push(norm);
       }
     },
-    songTitleError(state, action: PayloadAction<{ passageId: number; error: string }>) {
-      state.songTitleStatusById[action.payload.passageId] = "error";
-      state.songTitleErrorById[action.payload.passageId] = action.payload.error;
+    songTitleError(state, action: PayloadAction<{ passageId: number; version: VersionKey; error: string }>) {
+      const k = `${action.payload.passageId}:${action.payload.version}`;
+      state.songTitleStatusById[k] = "error";
+      state.songTitleErrorById[k] = action.payload.error;
     },
   },
 });
