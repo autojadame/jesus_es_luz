@@ -13,9 +13,12 @@ import {
 } from "./llmSlice";
 import { addHistoryEntry } from "@/features/history/historySlice";
 
-// Si añades el reducer (recomendado) para actualizar el título en histórico,
-// descomenta esta línea:
-// import { updateSongTitleForLatestByPassage } from "@/features/history/historySlice";
+type VersionKey = "v1" | "v2";
+
+const STYLE_TAGS: Record<VersionKey, string> = {
+  v1: "Ballad, New Romanticism",
+  v2: "Cinematic Modern Worship Pop",
+};
 
 function sysJsonOnly() {
   return `Eres un generador de JSON. Devuelve SOLO JSON válido, sin markdown, sin backticks, sin texto extra.`;
@@ -36,7 +39,144 @@ function isReasonableTitle(t: string) {
   if (!x) return false;
   if (x.length < 3) return false;
   if (x.length > 70) return false;
+  // evita títulos excesivamente genéricos
+  const n = normTitle(x);
+  const tooGeneric = new Set([
+    "tu amor",
+    "mi corazon",
+    "eres tu",
+    "mi dios",
+    "mi senor",
+    "dios mio",
+    "gracias",
+    "esperanza",
+    "fe",
+    "amor",
+    "luz",
+  ]);
+  if (tooGeneric.has(n)) return false;
   return true;
+}
+
+/**
+ * Comprueba si el título está disponible en el NAS para la carpeta del día + versión.
+ * - Si el NAS está caído o el IPC no existe, NO bloquea (devuelve true).
+ * - Intenta primero con {version,...}. Si falla por compat, reintenta sin version.
+ */
+async function checkTitleAvailableOnNas(params: {
+  createdAt: number;
+  songTitle: string;
+  entryId: string;
+  version: VersionKey;
+}): Promise<boolean> {
+  const api = (window as any)?.electronAPI?.library;
+  if (!api?.checkSongTitle) return true;
+
+  try {
+    const out = await api.checkSongTitle({
+      createdAt: params.createdAt,
+      songTitle: params.songTitle,
+      entryId: params.entryId,
+      version: params.version,
+    });
+    return !!out?.available;
+  } catch {
+    try {
+      // compat antigua (sin version)
+      const out = await api.checkSongTitle({
+        createdAt: params.createdAt,
+        songTitle: params.songTitle,
+        entryId: params.entryId,
+      });
+      return !!out?.available;
+    } catch {
+      return true;
+    }
+  }
+}
+
+async function llmGenerateUniqueTitle(args: {
+  passageId: number;
+  version: VersionKey;
+  ref: string;
+  testamento?: string;
+  summaryTitulo?: string;
+  summaryDescripcion?: string;
+  letra: string;
+  banned: Set<string>;
+  createdAt: number;
+  entryId: string;
+}): Promise<string> {
+  const MAX_RETRIES = 6;
+  const temperature = 0.72;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    const bannedList = Array.from(args.banned).filter(Boolean).slice(0, 110);
+
+    const user = [
+      `Quiero un NUEVO título corto y memorable en español para una canción worship.`,
+      `Versión: ${args.version.toUpperCase()} — Estilo: ${STYLE_TAGS[args.version]}.`,
+      `Referencia: ${args.ref}.${args.testamento ? ` Testamento: ${args.testamento}.` : ""}`,
+      args.summaryTitulo ? `Idea/tema: ${args.summaryTitulo}` : "",
+      args.summaryDescripcion ? `Resumen: ${args.summaryDescripcion}` : "",
+      "",
+      `LETRA (solo para inspirarte, NO la repitas):`,
+      String(args.letra ?? "").slice(0, 2200),
+      "",
+      `Reglas (estrictas):`,
+      `- 2 a 6 palabras, cantable, sin comillas.`,
+      `- Evita palabras repetidas muy típicas (p.ej., “aquietud”, “penumbra”) salvo que sea imprescindible.`,
+      `- No repitas (ni muy parecido a) ninguno de estos títulos:`,
+      bannedList.length ? bannedList.join(" | ") : "(ninguno)",
+      "",
+      `Devuelve SOLO JSON OBJETO con este formato exacto:`,
+      `{ "id": ${args.passageId}, "titulo": "..." }`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const resp = await window.electronAPI.deepseek.chat({
+      model: "deepseek-chat",
+      messages: [
+        { role: "system", content: sysJsonOnly() },
+        { role: "user", content: user },
+      ],
+      max_tokens: 220,
+      temperature,
+    });
+
+    const objText = extractJsonObject(resp.content);
+    const parsed = JSON.parse(objText) as { id: number; titulo: string };
+
+    const title = String(parsed?.titulo ?? "").trim();
+    const n = normTitle(title);
+
+    if (!isReasonableTitle(title)) {
+      args.banned.add(n || `bad_${attempt}`);
+      continue;
+    }
+
+    if (args.banned.has(n)) {
+      args.banned.add(n);
+      continue;
+    }
+
+    const okNas = await checkTitleAvailableOnNas({
+      createdAt: args.createdAt,
+      songTitle: title,
+      entryId: args.entryId,
+      version: args.version,
+    });
+
+    if (!okNas) {
+      args.banned.add(n);
+      continue;
+    }
+
+    return title;
+  }
+
+  throw new Error("No se pudo generar un título único (demasiados intentos/repeticiones).");
 }
 
 export function fetchSummaries(batch: BibleItem[]) {
@@ -85,40 +225,58 @@ export function fetchSummaries(batch: BibleItem[]) {
   };
 }
 
-const SONG_PROMPT_BASE = `Escribe una letra original en español, estilo balada worship cristiano, emocional, íntima y profesional, con rima suave y cantable, Letra original de adoración, inspirada en fe cristiana, no basada en textos bíblicos literales. Estructura obligatoria: Estrofa 1, Estrofa 2, Pre-chorus, Estribillo, Estrofa 3, Pre-chorus 2, Estribillo, Bridge, Estribillo final. Mantén un lenguaje moderno pero reverente, imágenes poéticas, progresión emocional (de fragilidad a esperanza), y evita clichés repetidos. Longitud aproximada: 3–4 min.
-Prompt completo (control total, mejores resultados)
-Quiero que compongas una letra original en español, con calidad “lista para grabar”, estilo balada (70–90 BPM), worship cristiano. Requisitos: Prohibido usar “Jehová”. Usa “Señor”, “Dios”, “Cristo”, “Salvador”, “Padre”, “Altísimo” (elige con coherencia, sin mezclar por mezclar).
-Estructura exacta:
-ESTROFA 1 (4 líneas)
-ESTROFA 2 (4 líneas)
-PRE-CHORUS (4 líneas, subiendo tensión emocional)
-ESTRIBILLO (8 líneas, muy melódico y memorable)
-ESTROFA 3 (4 líneas, más esperanzada)
-PRE-CHORUS 2 (4 líneas, variación del anterior)
-ESTRIBILLO (repetición igual o con 1–2 ajustes)
-BRIDGE (8 líneas, clímax emocional, sigue siendo balada)
-ESTRIBILLO FINAL (8 líneas, resolución y descanso)
-Estilo: íntimo, cinematográfico y humano (fragilidad real → consuelo → confianza).
-Rima: suave pero consistente (no forzada), frases cantables, sin trabalenguas.
-Lenguaje: moderno, reverente, sin términos excesivamente evangélicos; evita clichés (“en victoria”, “romper cadenas” salvo que lo uses con originalidad).
-Recursos: metáforas de luz/sombra, hogar, abrazo, camino, amanecer, silencio, pero muy importante que no las uses en todas las letras de las canciones, sino con imágenes nuevas.
-Entrega: solo la letra con títulos de secciones, sin explicación`;
+const SONG_PROMPT_BASE = `Escribe una letra original en español, estilo balada worship cristiano, emocional, íntima y profesional, con rima suave y cantable. Letra original de adoración, inspirada en fe cristiana, no basada en textos bíblicos literales.
+Estructura obligatoria: Estrofa 1, Estrofa 2, Pre-chorus, Estribillo, Estrofa 3, Pre-chorus 2, Estribillo, Bridge, Estribillo final.
+Mantén un lenguaje moderno pero reverente, imágenes poéticas, progresión emocional (de fragilidad a esperanza), y evita clichés repetidos.
+Longitud aproximada: 3–4 min.
+
+Reglas extra:
+- Prohibido usar “Jehová”. Usa “Señor”, “Dios”, “Cristo”, “Salvador”, “Padre”, “Altísimo”.
+- Evita repetir palabras “muletilla” entre canciones (p.ej. “aquietud”, “penumbra”).
+Entrega: solo la letra con títulos de secciones, sin explicación.`;
 
 export function generateSong(p: BibleItem, summary?: { titulo?: string; descripcion?: string }) {
   return async (dispatch: AppDispatch, getState: () => RootState) => {
     dispatch(songStart(p.id));
     try {
+      const st0 = getState();
+      const s0 = st0.llm.summariesById[p.id];
+
+      // ✅ entryId/createdAt desde aquí para poder comprobar colisiones por carpeta del día
+      const createdAt = Date.now();
+      const entryId = `${p.id}-${createdAt}-${Math.random().toString(16).slice(2)}`;
+
+      const ref = `${p.libro} ${p.capitulo}:${p.versiculo_inicial}-${p.versiculo_final}`;
+
+      // ✅ Cache títulos usados (histórico + memoria)
+      const banned = new Set<string>();
+      for (const h of (st0.history.entries as any) ?? []) {
+        const t1 = String(h?.songTituloV1 ?? h?.songTitulo ?? "").trim();
+        const t2 = String(h?.songTituloV2 ?? "").trim();
+        if (t1) banned.add(normTitle(t1));
+        if (t2) banned.add(normTitle(t2));
+      }
+      for (const k of Object.keys(st0.llm.songsById ?? {})) {
+        const ss = (st0.llm.songsById as any)?.[Number(k)];
+        if (ss?.titulo) banned.add(normTitle(ss.titulo));
+      }
+
+      // 1) Generar letra + (opcional) sugerencia de 2 títulos
       const user = [
         SONG_PROMPT_BASE,
         ``,
         `Inspiración (NO literal):`,
-        `- Referencia: ${p.libro} ${p.capitulo}:${p.versiculo_inicial}-${p.versiculo_final}`,
+        `- Referencia: ${ref}`,
         `- Testamento: ${p.testamento}`,
-        summary?.titulo ? `- Título/tema: ${summary.titulo}` : ``,
-        summary?.descripcion ? `- Resumen: ${summary.descripcion}` : ``,
+        summary?.titulo ? `- Título/tema: ${summary.titulo}` : s0?.titulo ? `- Título/tema: ${s0.titulo}` : ``,
+        summary?.descripcion ? `- Resumen: ${summary.descripcion}` : s0?.descripcion ? `- Resumen: ${s0.descripcion}` : ``,
         ``,
         `Devuelve SOLO JSON OBJETO con este formato:`,
-        `{ "id": ${p.id}, "titulo": "título corto", "letra": "LETRA COMPLETA CON SECCIONES" }`,
+        `{ "id": ${p.id}, "titulo_v1": "título corto", "titulo_v2": "título corto", "letra": "LETRA COMPLETA CON SECCIONES" }`,
+        `Reglas de títulos (estrictas):`,
+        `- 2 a 6 palabras, sin comillas.`,
+        `- V1 y V2 deben ser distintos entre sí.`,
+        `- No uses ninguno de estos títulos (ni muy parecido): ${Array.from(banned).slice(0, 80).join(" | ") || "(ninguno)"}`,
       ]
         .filter(Boolean)
         .join("\n");
@@ -134,20 +292,75 @@ export function generateSong(p: BibleItem, summary?: { titulo?: string; descripc
       });
 
       const objText = extractJsonObject(resp.content);
-      const parsed = JSON.parse(objText) as SongResult;
+      const raw = JSON.parse(objText) as any;
 
-      dispatch(songSuccess(parsed));
+      const letra = String(raw?.letra ?? "").trim();
+      if (!letra) throw new Error("La IA no devolvió letra.");
 
-      // ✅ Persistir histórico (título/desc desde store si no viene en summary)
+      let tituloV1 = String(raw?.titulo_v1 ?? raw?.titulo ?? "").trim();
+      let tituloV2 = String(raw?.titulo_v2 ?? "").trim();
+
+      // 2) Validación estricta + disponibilidad NAS por versión
       const st = getState();
       const s = st.llm.summariesById[p.id];
 
-      const entryId = `${p.id}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const ensureTitle = async (version: VersionKey, proposed: string) => {
+        const n = normTitle(proposed);
+        if (!isReasonableTitle(proposed) || !proposed || banned.has(n)) return "";
+        const okNas = await checkTitleAvailableOnNas({ createdAt, songTitle: proposed, entryId, version });
+        if (!okNas) return "";
+        return proposed;
+      };
 
+      tituloV1 = await ensureTitle("v1", tituloV1);
+      if (!tituloV1) {
+        tituloV1 = await llmGenerateUniqueTitle({
+          passageId: p.id,
+          version: "v1",
+          ref,
+          testamento: String(p.testamento ?? ""),
+          summaryTitulo: summary?.titulo ?? s?.titulo ?? "",
+          summaryDescripcion: summary?.descripcion ?? s?.descripcion ?? "",
+          letra,
+          banned,
+          createdAt,
+          entryId,
+        });
+      }
+      banned.add(normTitle(tituloV1));
+
+      tituloV2 = await ensureTitle("v2", tituloV2);
+      if (!tituloV2 || normTitle(tituloV2) === normTitle(tituloV1)) {
+        // aseguramos que sea distinto a V1
+        banned.add(normTitle(tituloV2 || tituloV1));
+        tituloV2 = await llmGenerateUniqueTitle({
+          passageId: p.id,
+          version: "v2",
+          ref,
+          testamento: String(p.testamento ?? ""),
+          summaryTitulo: summary?.titulo ?? s?.titulo ?? "",
+          summaryDescripcion: summary?.descripcion ?? s?.descripcion ?? "",
+          letra,
+          banned,
+          createdAt,
+          entryId,
+        });
+      }
+
+      // ✅ Guardamos en estado: titulo = V1 (compat)
+      const parsed: SongResult = {
+        id: p.id,
+        titulo: tituloV1,
+        letra,
+      };
+
+      dispatch(songSuccess(parsed));
+
+      // ✅ Persistir histórico (guardamos V1+V2 en campos extra si existen en el tipo; si no, casteamos)
       dispatch(
         addHistoryEntry({
           entryId,
-          createdAt: Date.now(),
+          createdAt,
           passageId: p.id,
           libro: p.libro,
           capitulo: p.capitulo,
@@ -159,9 +372,11 @@ export function generateSong(p: BibleItem, summary?: { titulo?: string; descripc
           summaryTitulo: summary?.titulo ?? s?.titulo ?? "",
           summaryDescripcion: summary?.descripcion ?? s?.descripcion ?? "",
 
-          songTitulo: parsed.titulo,
-          songLetra: parsed.letra,
-        })
+          songTitulo: tituloV1,
+          songTituloV1: tituloV1,
+          songTituloV2: tituloV2,
+          songLetra: letra,
+        } as any)
       );
     } catch (e: any) {
       dispatch(songError({ id: p.id, error: e?.message ?? "Error generando canción" }));
@@ -170,124 +385,88 @@ export function generateSong(p: BibleItem, summary?: { titulo?: string; descripc
 }
 
 /**
- * ✅ Regenera SOLO el título (no toca la letra).
- * - Evita repetir títulos usando cache (histórico + títulos en memoria).
- * - Reintenta si repite.
- * - Usa un poco de temperatura para diversidad.
+ * ✅ Regenera SOLO los títulos (V1 + V2) del pasaje actual.
+ * - No toca la letra.
+ * - Evita repetir en histórico/estado actual.
+ * - Comprueba colisión con carpetas NAS por versión.
+ *
+ * Nota: para reflejarlo en el histórico sin crear nueva entrada, necesitas reducers de update en historySlice.
  */
 export function regenerateSongTitle(passageId: number) {
   return async (dispatch: AppDispatch, getState: () => RootState) => {
-    // Reutilizamos songStart/songSuccess para no añadir más estado si no quieres.
     dispatch(songStart(passageId));
 
     try {
       const st0 = getState();
-      const passage = st0.settings.items.find((x) => x.id === passageId);
+      const passage = (st0.settings as any)?.items?.find((x: any) => x.id === passageId) as BibleItem | undefined;
       if (!passage) throw new Error("Pasaje no encontrado.");
 
-      const currentSong = st0.llm.songsById?.[passageId];
+      const currentSong = st0.llm.songsById?.[passageId] as any;
       if (!currentSong?.letra) throw new Error("No hay letra aún. Primero genera la canción.");
 
+      const latest = ((st0.history.entries as any) ?? []).find((x: any) => x?.passageId === passageId);
+      const entryId = String((latest as any)?.entryId ?? `${passageId}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+      const createdAt = Number((latest as any)?.createdAt ?? Date.now());
+
       const summary = st0.llm.summariesById?.[passageId];
-
-      // ✅ Cache de títulos usados (persistente vía history + en memoria)
-      const banned = new Set<string>();
-
-      // títulos del histórico
-      for (const h of st0.history.entries ?? []) {
-        if (h?.songTitulo) banned.add(normTitle(h.songTitulo));
-      }
-
-      // títulos actuales en memoria (por si aún no están en history)
-      for (const k of Object.keys(st0.llm.songsById ?? {})) {
-        const s = st0.llm.songsById?.[Number(k)];
-        if (s?.titulo) banned.add(normTitle(s.titulo));
-      }
-
-      // título actual del pasaje
-      if (currentSong.titulo) banned.add(normTitle(currentSong.titulo));
-
       const ref = `${passage.libro} ${passage.capitulo}:${passage.versiculo_inicial}-${passage.versiculo_final}`;
 
-      const MAX_RETRIES = 4;
-      const temperature = 0.65;
-
-      let finalTitle = "";
-      let finalNorm = "";
-
-      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        const bannedList = Array.from(banned).filter(Boolean).slice(0, 90);
-
-        const user = [
-          `Quiero un NUEVO título corto y memorable en español para esta canción worship (balada).`,
-          `Referencia: ${ref}. Testamento: ${passage.testamento}.`,
-          summary?.titulo ? `Idea/tema: ${summary.titulo}` : "",
-          summary?.descripcion ? `Resumen: ${summary.descripcion}` : "",
-          ``,
-          `LETRA (solo para inspirarte, NO la repitas):`,
-          currentSong.letra.slice(0, 2200),
-          ``,
-          `Reglas:`,
-          `- 2 a 6 palabras, cantable, sin comillas.`,
-          `- Evita títulos genéricos tipo “Tu Amor”, “Mi Corazón”, “Eres Tú”.`,
-          `- No repitas (ni muy parecido a) ninguno de estos títulos:`,
-          bannedList.length ? bannedList.join(" | ") : "(ninguno)",
-          ``,
-          `Devuelve SOLO JSON OBJETO con este formato exacto:`,
-          `{ "id": ${passageId}, "titulo": "..." }`,
-        ]
-          .filter(Boolean)
-          .join("\n");
-
-        const resp = await window.electronAPI.deepseek.chat({
-          model: "deepseek-chat",
-          messages: [
-            { role: "system", content: sysJsonOnly() },
-            { role: "user", content: user },
-          ],
-          max_tokens: 200,
-          temperature,
-        });
-
-        const objText = extractJsonObject(resp.content);
-        const parsed = JSON.parse(objText) as { id: number; titulo: string };
-
-        const title = String(parsed?.titulo ?? "").trim();
-        const n = normTitle(title);
-
-        if (!isReasonableTitle(title)) {
-          banned.add(n || `bad_${attempt}`);
-          continue;
-        }
-
-        if (banned.has(n)) {
-          banned.add(n);
-          continue;
-        }
-
-        finalTitle = title;
-        finalNorm = n;
-        break;
+      const banned = new Set<string>();
+      for (const h of (st0.history.entries as any) ?? []) {
+        const t1 = String(h?.songTituloV1 ?? h?.songTitulo ?? "").trim();
+        const t2 = String(h?.songTituloV2 ?? "").trim();
+        if (t1) banned.add(normTitle(t1));
+        if (t2) banned.add(normTitle(t2));
       }
+      for (const k of Object.keys(st0.llm.songsById ?? {})) {
+        const ss = (st0.llm.songsById as any)?.[Number(k)];
+        if (ss?.titulo) banned.add(normTitle(ss.titulo));
+      }
+      if (currentSong?.titulo) banned.add(normTitle(currentSong.titulo));
 
-      if (!finalTitle) throw new Error("No se pudo generar un título único (demasiadas repeticiones).");
+      const tituloV1 = await llmGenerateUniqueTitle({
+        passageId,
+        version: "v1",
+        ref,
+        testamento: String(passage.testamento ?? ""),
+        summaryTitulo: summary?.titulo ?? "",
+        summaryDescripcion: summary?.descripcion ?? "",
+        letra: String(currentSong.letra),
+        banned,
+        createdAt,
+        entryId,
+      });
+      banned.add(normTitle(tituloV1));
 
-      // ✅ Actualiza SOLO el título en songsById, manteniendo la letra intacta
+      const tituloV2 = await llmGenerateUniqueTitle({
+        passageId,
+        version: "v2",
+        ref,
+        testamento: String(passage.testamento ?? ""),
+        summaryTitulo: summary?.titulo ?? "",
+        summaryDescripcion: summary?.descripcion ?? "",
+        letra: String(currentSong.letra),
+        banned,
+        createdAt,
+        entryId,
+      });
+
       const updated: SongResult = {
         id: passageId,
-        titulo: finalTitle,
+        titulo: tituloV1,
         letra: currentSong.letra,
       };
 
       dispatch(songSuccess(updated));
 
-      // ✅ Opcional: actualiza el histórico también (si añades el reducer)
-      // dispatch(updateSongTitleForLatestByPassage({ passageId, songTitulo: finalTitle }));
+      // ✅ Si implementas reducers de update en historySlice, aquí actualizas:
+      // dispatch(updateSongTitleForLatestByPassage({ passageId, version: "v1", songTitulo: tituloV1 }));
+      // dispatch(updateSongTitleForLatestByPassage({ passageId, version: "v2", songTitulo: tituloV2 }));
 
-      // Mete el título nuevo en el set (por si el usuario vuelve a intentar)
-      banned.add(finalNorm);
+      // Si NO tienes reducers, al menos evita colisiones futuras en esta sesión:
+      banned.add(normTitle(tituloV2));
     } catch (e: any) {
-      dispatch(songError({ id: passageId, error: e?.message ?? "Error regenerando título" }));
+      dispatch(songError({ id: passageId, error: e?.message ?? "Error regenerando títulos" }));
     }
   };
 }

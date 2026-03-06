@@ -23,8 +23,8 @@ function safeName(s: string) {
     .slice(0, 120);
 }
 
-function ensureExt(kind: "mp3" | "srt") {
-  return kind === "mp3" ? ".mp3" : ".srt";
+function ensureExt(kind: "mp3" | "srt" | "wav") {
+  return kind === "mp3" ? ".mp3" : kind === "wav" ? ".wav" : ".srt";
 }
 
 // --------------------
@@ -79,23 +79,63 @@ export async function checkNasRoot(root: string): Promise<{ ok: boolean; message
 }
 
 function buildLibBase(nasRoot: string) {
-  // UNC/Windows path
   return path.win32.join(nasRoot, ...LIB_SUBPATH);
 }
 
+type VersionKey = "v1" | "v2";
+type FileKind = "mp3" | "srt" | "wav";
+
 export type SaveToLibraryInput = {
-  kind: "mp3" | "srt";
+  version: VersionKey;
+  kind: FileKind;
   sourcePath: string;
   createdAt: number;
   songTitle: string;
+  entryId?: string;
 };
 
 export type SaveToLibraryOutput = {
   destPath: string;
 };
 
+export type CheckSongTitleInput = {
+  createdAt: number;
+  songTitle: string;
+  version: VersionKey;
+};
+
+export type CheckSongTitleOutput = {
+  available: boolean;
+  destDir: string;
+};
+
+function buildDateFolder(createdAt: number, version: VersionKey) {
+  return `${formatYYYY_MM_DD(createdAt || Date.now())}_${String(version).toUpperCase()}`;
+}
+
+export async function checkSongTitleAvailability(
+  input: CheckSongTitleInput
+): Promise<CheckSongTitleOutput> {
+  const nasRoot = await getNasRoot();
+  const LIB_BASE = buildLibBase(nasRoot);
+
+  const dateFolder = buildDateFolder(input.createdAt, input.version);
+  const songName = safeName(input.songTitle);
+  const destDir = path.win32.join(LIB_BASE, dateFolder, songName);
+
+  try {
+    const st = await fs.promises.stat(destDir);
+    return { available: !st.isDirectory(), destDir };
+  } catch {
+    return { available: true, destDir };
+  }
+}
+
 export async function saveToLibrary(input: SaveToLibraryInput): Promise<SaveToLibraryOutput> {
   if (!input.sourcePath) throw new Error("sourcePath vacío.");
+  if (input.version !== "v1" && input.version !== "v2") {
+    throw new Error("version inválida. Debe ser 'v1' o 'v2'.");
+  }
 
   const ext = ensureExt(input.kind);
   const srcLower = input.sourcePath.toLowerCase();
@@ -107,7 +147,11 @@ export async function saveToLibrary(input: SaveToLibraryInput): Promise<SaveToLi
   const nasRoot = await getNasRoot();
   const LIB_BASE = buildLibBase(nasRoot);
 
-  const dateFolder = formatYYYY_MM_DD(input.createdAt || Date.now());
+  // ✅ AQUÍ ESTÁ EL CAMBIO CLAVE:
+  // V1 => YYYY_MM_DD_V1
+  // V2 => YYYY_MM_DD_V2
+  const dateFolder = buildDateFolder(input.createdAt || Date.now(), input.version);
+
   const songName = safeName(input.songTitle);
 
   const destDir = path.win32.join(LIB_BASE, dateFolder, songName);

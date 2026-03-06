@@ -49,7 +49,11 @@ const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()
 
 function isAllowedFile(f: File) {
   const name = (f?.name ?? "").toLowerCase();
-  return name.endsWith(".mp3") || name.endsWith(".srt");
+  return (
+    name.endsWith(".mp3") ||
+    name.endsWith(".wav") ||
+    name.endsWith(".srt")
+  );
 }
 
 export function DropZone({
@@ -57,7 +61,7 @@ export function DropZone({
   onInfo,
 }: {
   onDropFile: (file: File) => Promise<void> | void;
-  onInfo?: (msg: string) => void; // optional toast hook
+  onInfo?: (msg: string) => void;
 }) {
   const [over, setOver] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -70,17 +74,20 @@ export function DropZone({
     const rejected = files.length - allowed.length;
 
     if (!allowed.length) {
-      onInfo?.("Only .mp3 or .srt files are allowed.");
+      onInfo?.("Only .mp3, .wav or .srt files are allowed.");
       return;
     }
-    if (rejected > 0) onInfo?.(`Ignored ${rejected} file(s). Only .mp3/.srt are accepted.`);
+
+    if (rejected > 0) {
+      onInfo?.(`Ignored ${rejected} file(s). Only .mp3/.wav/.srt are accepted.`);
+    }
 
     flushSync(() => {
       setBusy(true);
       setProgress({ i: 0, n: allowed.length });
     });
 
-    await nextFrame(); // ensure loader paints
+    await nextFrame();
 
     try {
       for (let i = 0; i < allowed.length; i++) {
@@ -100,7 +107,7 @@ export function DropZone({
       <Zone
         $over={over}
         $busy={busy}
-        title="Drop MP3/SRT here or click to select"
+        title="Drop MP3/WAV/SRT here or click to select"
         onClick={() => {
           if (busy) return;
           inputRef.current?.click();
@@ -123,6 +130,7 @@ export function DropZone({
           if (busy) return;
 
           setOver(false);
+
           const files = Array.from(e.dataTransfer.files ?? []);
           if (!files.length) return;
 
@@ -130,10 +138,15 @@ export function DropZone({
         }}
       >
         <div className="t">
-          {busy ? "Guardando…" : "Suéltalo o haz clic aquí para añadir los archivos (MP3/SRT)"}
+          {busy
+            ? "Guardando…"
+            : "Suéltalo o haz clic aquí para añadir archivos (MP3/WAV/SRT)"}
         </div>
+
         <div className="s">
-          {busy ? "Por favor no cierres la ventana." : "Puedes seleccionar multiples archivos (.mp3 + .srt)."}
+          {busy
+            ? "Por favor no cierres la ventana."
+            : "Puedes seleccionar múltiples archivos (.mp3 + .wav + .srt)."}
         </div>
 
         {busy && (
@@ -146,19 +159,19 @@ export function DropZone({
         )}
       </Zone>
 
-      {/* Hidden file picker */}
       <input
         ref={inputRef}
         type="file"
         multiple
-        accept=".mp3,.srt,audio/mpeg,text/plain"
+        accept=".mp3,.wav,.srt,audio/mpeg,audio/wav,text/plain"
         style={{ display: "none" }}
         onChange={async (e) => {
           const files = Array.from(e.target.files ?? []);
-          // reset input so selecting same files again still triggers change
           e.target.value = "";
+
           if (!files.length) return;
           if (busy) return;
+
           await processFiles(files);
         }}
       />
