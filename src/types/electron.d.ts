@@ -36,10 +36,10 @@ declare global {
         }>;
       };
 
-
       library: {
         saveToLibrary: (payload: {
-          kind: "mp3" | "srt";
+          version: "v1" | "v2";
+          kind: "mp3" | "wav" | "srt";
           sourcePath: string;
           createdAt: number;
           songTitle: string;
@@ -53,20 +53,21 @@ declare global {
 
       files: {
         getPathForFile: (file: File) => string;
-        openPath: (p: string) => Promise<string>; // shell.openPath devuelve string error o ""
+        openPath: (p: string) => Promise<string>;
         revealInFolder: (p: string) => Promise<void>;
       };
-      windowControls: {
-  minimize: () => Promise<boolean>;
-  toggleMaximize: () => Promise<boolean>;
-  close: () => Promise<boolean>;
-  isMaximized: () => Promise<boolean>;
-  onMaximized: (cb: (v: boolean) => void) => () => void;
 
-  dragStart: (p: { screenX: number; screenY: number }) => void;
-  dragMove: (p: { screenX: number; screenY: number }) => void;
-  dragEnd: () => void;
-};
+      windowControls: {
+        minimize: () => Promise<boolean>;
+        toggleMaximize: () => Promise<boolean>;
+        close: () => Promise<boolean>;
+        isMaximized: () => Promise<boolean>;
+        onMaximized: (cb: (v: boolean) => void) => () => void;
+
+        dragStart: (p: { screenX: number; screenY: number }) => void;
+        dragMove: (p: { screenX: number; screenY: number }) => void;
+        dragEnd: () => void;
+      };
     };
   }
 }

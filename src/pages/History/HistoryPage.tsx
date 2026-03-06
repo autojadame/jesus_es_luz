@@ -2,12 +2,7 @@ import React, { useMemo, useState } from "react";
 import { useAppDispatch, useAppSelector } from "@/app/hooks";
 import { Button } from "@/ui/components/Button";
 import { Toast } from "@/ui/components/Toast";
-import {
-  clearHistory,
-  clearSavedFilesForEntryId,
-  setSavedFileForEntryId,
-} from "@/features/history/historySlice";
-import { regenerateSongTitleForEntry } from "@/features/llm/thunks";
+import { clearHistory, setSavedFileForEntryId } from "@/features/history/historySlice";
 import { DropZone } from "@/ui/components/DropZone";
 import { Wrap, Header, Item, Expand, Col, RightTools } from "./History.styles";
 import type { HistoryEntry } from "@/types/history";
@@ -25,95 +20,7 @@ import {
 import { addLineBreaksAfterDotUpper } from "@/utils/textFormat";
 import { clearDiscardedIds } from "@/features/settings/settingsSlice";
 
-type VersionKey = "v1" | "v2";
-type FileKind = "mp3" | "srt";
-type SavedFile = { path: string; savedAt: number };
-type SavedVersions = {
-  v1: Partial<Record<FileKind, SavedFile>>;
-  v2: Partial<Record<FileKind, SavedFile>>;
-};
-
-const STYLE_TAGS: Record<VersionKey, string> = {
-  v1: "Ballad, New Romanticism",
-  v2: "Ballad, New Romanticism",
-};
-
-function normalizeSaved(saved: any): SavedVersions {
-  if (!saved) return { v1: {}, v2: {} };
-  if ((saved.mp3 || saved.srt) && !saved.v1 && !saved.v2) {
-    return { v1: { mp3: saved.mp3, srt: saved.srt }, v2: {} };
-  }
-  return { v1: saved.v1 || {}, v2: saved.v2 || {} };
-}
-
-function isComplete(saved: SavedVersions) {
-  return !!(saved.v1.mp3 && saved.v2.mp3 && saved.v1.srt && saved.v2.srt);
-}
-
-function hasAnySaved(saved: SavedVersions) {
-  return !!(saved.v1.mp3 || saved.v2.mp3 || saved.v1.srt || saved.v2.srt);
-}
-
-function pickTargetVersion(saved: SavedVersions, kind: FileKind): VersionKey | null {
-  if (!saved.v1[kind]) return "v1";
-  if (!saved.v2[kind]) return "v2";
-  return null;
-}
-
-async function ensureTitleAvailableOrRegenerate(opts: {
-  dispatch: any;
-  setToast: (m: string) => void;
-  entry: HistoryEntry;
-  version: VersionKey;
-  currentTitle: string;
-}) {
-  const entry: any = opts.entry;
-  const createdAt = Number(entry?.createdAt ?? Date.now());
-  const entryId = String(entry?.entryId ?? "");
-
-  const saved = normalizeSaved(entry?.saved);
-  const firstForVersion = !(saved?.[opts.version]?.mp3 || saved?.[opts.version]?.srt);
-  if (!firstForVersion) return opts.currentTitle;
-
-  try {
-    const chk = await (window as any).electronAPI.library.checkSongTitle({
-      createdAt,
-      songTitle: opts.currentTitle,
-      entryId,
-    });
-
-    if (chk?.available) return opts.currentTitle;
-
-    opts.setToast(`Título ${opts.version.toUpperCase()} ocupado en la carpeta de hoy. Regenerando…`);
-
-    const newTitle = await opts.dispatch(
-      regenerateSongTitleForEntry({
-        entryId,
-        passageId: entry.passageId,
-        version: opts.version,
-        createdAt,
-        libro: entry.libro,
-        capitulo: entry.capitulo,
-        versiculo_inicial: entry.versiculo_inicial,
-        versiculo_final: entry.versiculo_final,
-        testamento: entry.testamento,
-        summaryTitulo: entry.summaryTitulo,
-        summaryDescripcion: entry.summaryDescripcion,
-        letra: entry.songLetra,
-      })
-    );
-
-    return String(newTitle ?? "").trim() || opts.currentTitle;
-  } catch {
-    return opts.currentTitle;
-  }
-}
-
-function getTitle(entry: any, version: VersionKey): string {
-  const t1 = String(entry?.songTituloV1 ?? entry?.songTitulo ?? "").trim();
-  const t2 = String(entry?.songTituloV2 ?? "").trim();
-  return version === "v1" ? t1 : t2;
-}
+const STYLE_TAG = "Ballad, New Romanticism";
 
 function formatDate(ts: number) {
   try {
@@ -151,7 +58,17 @@ function SavedTag({ label, onClick }: { label: string; onClick: () => void }) {
     </span>
   );
 }
+type VersionKey = "v1" | "v2";
+type FileKind = "mp3" | "srt" | "wav";
 
+function pickVersion(saved: any, kind: FileKind): VersionKey {
+  const v1Has = !!saved?.v1?.[kind];
+  const v2Has = !!saved?.v2?.[kind];
+  if (!v1Has) return "v1";
+  if (!v2Has) return "v2";
+  // si ya están ambas, aquí normalmente bloqueas
+  return "v2";
+}
 export function HistoryPage() {
   const dispatch = useAppDispatch();
   const entries = useAppSelector((s) => s.history.entries) as HistoryEntry[];
@@ -176,8 +93,8 @@ export function HistoryPage() {
     }
   }
 
-  async function openSavedFolder(saved: SavedVersions) {
-    const p = saved.v1.mp3?.path || saved.v1.srt?.path || saved.v2.mp3?.path || saved.v2.srt?.path;
+  async function openSavedFolder(savedMp3?: { path: string }, savedSrt?: { path: string }) {
+    const p = savedMp3?.path || savedSrt?.path;
     if (!p) return;
     try {
       await window.electronAPI.files.revealInFolder(p);
@@ -192,47 +109,28 @@ export function HistoryPage() {
     const pth = pthRaw ? (pthRaw.includes("/") ? pthRaw.replace(/\//g, "\\") : pthRaw) : "";
 
     if (!pth) {
-      setToast("No se pudo obtener la ruta del archivo (Electron)." );
+      setToast("No se pudo obtener la ruta del archivo (Electron).");
       return;
     }
 
     const lower = pth.toLowerCase();
-    const kind: FileKind | null = lower.endsWith(".mp3") ? "mp3" : lower.endsWith(".srt") ? "srt" : null;
+    const kind = lower.endsWith(".mp3") ? "mp3" : lower.endsWith(".srt") ? "srt" : "wav";
     if (!kind) {
-      setToast("Solo se acepta .mp3 o .srt");
+      setToast("Solo se acepta .mp3, .wav o .srt");
       return;
     }
 
-    const saved = normalizeSaved((entry as any).saved);
-    if (isComplete(saved)) {
-      setToast("Esta entrada ya está completa (V1/V2 MP3+SRT). Borra asignación si quieres volver a subir.");
-      return;
-    }
-
-    const version = pickTargetVersion(saved, kind);
-    if (!version) {
-      setToast(`Ya hay ${kind.toUpperCase()} V1 y V2. Borra la asignación para volver a subir.`);
-      return;
-    }
-
-    let songTitle = getTitle(entry as any, version);
+    const songTitle = (entry.songTitulo || "").trim();
     if (!songTitle) {
-      setToast(`No hay título para ${version.toUpperCase()} en esta entrada.`);
+      setToast("No hay título de canción para nombrar la carpeta/archivo.");
       return;
     }
-
-    // ✅ si la carpeta existe hoy con ese nombre, regenera el título y úsalo
-    songTitle = await ensureTitleAvailableOrRegenerate({
-      dispatch,
-      setToast,
-      entry,
-      version,
-      currentTitle: songTitle,
-    });
 
     try {
+      const version = pickVersion(entry.saved, kind);
       const out = await window.electronAPI.library.saveToLibrary({
-        kind,
+        version,              // "v1" | "v2"
+        kind,                 // "mp3" | "srt" | "wav"
         sourcePath: pth,
         createdAt: entry.createdAt,
         songTitle,
@@ -242,13 +140,12 @@ export function HistoryPage() {
       dispatch(
         setSavedFileForEntryId({
           entryId: entry.entryId,
-          version,
           kind,
           file: { path: out.destPath, savedAt: Date.now() },
         })
       );
 
-      setToast(`Guardado en librería: ${kind.toUpperCase()} ${version.toUpperCase()}`);
+      setToast(`Guardado en librería: ${kind.toUpperCase()}`);
     } catch (err: any) {
       setToast(err?.message ?? "Error guardando en librería");
     }
@@ -259,19 +156,15 @@ export function HistoryPage() {
       <Header>
         <div>
           <div className="t">Histórico</div>
-          <div className="sub">2 versiones por canción (V1/V2) con MP3 y SRT independientes.</div>
+          <div className="sub">Canciones generadas con sus metadatos (persistente).</div>
         </div>
 
         <RightTools>
           <div style={{ fontSize: 12, opacity: 0.72 }}>{count} entradas</div>
-          <Button
-            $variant="danger"
-            disabled={count === 0}
-            onClick={() => {
-              dispatch(clearHistory());
-              dispatch(clearDiscardedIds());
-            }}
-          >
+          <Button $variant="danger" disabled={count === 0} onClick={() => {
+            dispatch(clearHistory())
+            dispatch(clearDiscardedIds())
+          }}>
             Borrar todo
           </Button>
         </RightTools>
@@ -285,17 +178,14 @@ export function HistoryPage() {
 
       {list.map((e) => {
         const open = openId === e.entryId;
-        const saved = normalizeSaved((e as any).saved);
-        const complete = isComplete(saved);
 
-        const t1 = getTitle(e as any, "v1");
-        const t2 = getTitle(e as any, "v2");
+        const savedMp3 = e.saved?.mp3;
+        const savedSrt = e.saved?.srt;
 
         return (
           <Item
             key={e.entryId}
             $open={open}
-            $complete={complete}
             onClick={() => setOpenId(open ? null : e.entryId)}
             title="Click para expandir/contraer"
             role="button"
@@ -306,73 +196,29 @@ export function HistoryPage() {
                   {e.libro} {e.capitulo}:{e.versiculo_inicial}-{e.versiculo_final} • {e.testamento} • ID {e.passageId}
                 </div>
 
-                <div className="meta" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                <div
+                  className="meta"
+                  style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}
+                >
                   <span>Fecha: {formatDate(e.createdAt)}</span>
+                  {savedMp3 ? <SavedTag label="MP3" onClick={() => copyToDownloads(savedMp3.path, "MP3")} /> : null}
+                  {savedSrt ? <SavedTag label="SRT" onClick={() => copyToDownloads(savedSrt.path, "SRT")} /> : null}
 
-                  {saved.v1.mp3 ? <SavedTag label="MP3 V1" onClick={() => copyToDownloads(saved.v1.mp3!.path, "MP3 V1")} /> : null}
-                  {saved.v2.mp3 ? <SavedTag label="MP3 V2" onClick={() => copyToDownloads(saved.v2.mp3!.path, "MP3 V2")} /> : null}
-                  {saved.v1.srt ? <SavedTag label="SRT V1" onClick={() => copyToDownloads(saved.v1.srt!.path, "SRT V1")} /> : null}
-                  {saved.v2.srt ? <SavedTag label="SRT V2" onClick={() => copyToDownloads(saved.v2.srt!.path, "SRT V2")} /> : null}
-
-                  {complete ? (
-                    <span style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      height: 22,
-                      padding: "0 10px",
-                      borderRadius: 999,
-                      border: "1px solid rgba(255,255,255,0.14)",
-                      background: "rgba(74,222,128,0.14)",
-                      fontSize: 12,
-                      fontWeight: 850,
-                      color: "rgba(255,255,255,0.92)",
-                    }}>COMPLETO</span>
-                  ) : (
-                    <span style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      height: 22,
-                      padding: "0 10px",
-                      borderRadius: 999,
-                      border: "1px solid rgba(255,255,255,0.14)",
-                      background: "rgba(255,255,255,0.06)",
-                      fontSize: 12,
-                      fontWeight: 850,
-                      color: "rgba(255,255,255,0.92)",
-                    }}>2 versiones</span>
-                  )}
-
-                  {(hasAnySaved(saved)) ? (
-                    <>
-                      <Button
-                        $variant="ghost"
-                        onClick={(ev) => {
-                          ev.stopPropagation();
-                          openSavedFolder(saved);
-                        }}
-                        title="Abrir carpeta donde están los archivos guardados"
-                      >
-                        Abrir carpeta
-                      </Button>
-
-                      <Button
-                        $variant="danger"
-                        onClick={(ev) => {
-                          ev.stopPropagation();
-                          dispatch(clearSavedFilesForEntryId({ entryId: e.entryId }));
-                          setToast("Asignación borrada (NAS intacto).");
-                        }}
-                        title="No borra en el NAS. Solo quita la asignación para poder subir de nuevo."
-                      >
-                        Borrar asignación
-                      </Button>
-                    </>
+                  {(savedMp3 || savedSrt) ? (
+                    <Button
+                      $variant="ghost"
+                      onClick={(ev) => {
+                        ev.stopPropagation();
+                        openSavedFolder(savedMp3, savedSrt);
+                      }}
+                      title="Abrir carpeta donde están los archivos guardados"
+                    >
+                      Abrir carpeta
+                    </Button>
                   ) : null}
                 </div>
 
-                <div className="songTitle">{t1 || "(sin título V1)"}</div>
-                {t2 ? <div style={{ marginTop: 4, opacity: 0.75 }}>{t2}</div> : null}
-
+                <div className="songTitle">{e.songTitulo}</div>
                 <div className="summary">
                   <b>{e.summaryTitulo}</b>
                   {e.summaryDescripcion ? ` — ${e.summaryDescripcion}` : ""}
@@ -389,47 +235,32 @@ export function HistoryPage() {
                   </Col>
 
                   <Col>
-                    <div className="h">Canción (mismo texto, 2 versiones)</div>
+                    <div className="h">Canción</div>
 
                     <CopyRow>
                       <CopyField>
-                        <CopyLabel>Título V1</CopyLabel>
-                        <CopyInputWrap onClick={() => t1 && copyToClipboard(t1)} title="Click para copiar">
-                          <CopyInput readOnly value={t1 || ""} placeholder="(sin título)" />
+                        <CopyLabel>Título</CopyLabel>
+                        <CopyInputWrap
+                          onClick={() => e.songTitulo && copyToClipboard(e.songTitulo)}
+                          title="Click para copiar"
+                        >
+                          <CopyInput readOnly value={e.songTitulo || ""} placeholder="(sin título)" />
                           <CopyIcon />
                         </CopyInputWrap>
                       </CopyField>
 
                       <CopyField>
-                        <CopyLabel>Estilo V1</CopyLabel>
-                        <CopyInputWrap onClick={() => copyToClipboard(STYLE_TAGS.v1)} title="Click para copiar">
-                          <CopyInput readOnly value={STYLE_TAGS.v1} />
-                          <CopyIcon />
-                        </CopyInputWrap>
-                      </CopyField>
-                    </CopyRow>
-
-                    <CopyRow>
-                      <CopyField>
-                        <CopyLabel>Título V2</CopyLabel>
-                        <CopyInputWrap onClick={() => t2 && copyToClipboard(t2)} title="Click para copiar">
-                          <CopyInput readOnly value={t2 || ""} placeholder="(sin título V2)" />
-                          <CopyIcon />
-                        </CopyInputWrap>
-                      </CopyField>
-
-                      <CopyField>
-                        <CopyLabel>Estilo V2</CopyLabel>
-                        <CopyInputWrap onClick={() => copyToClipboard(STYLE_TAGS.v2)} title="Click para copiar">
-                          <CopyInput readOnly value={STYLE_TAGS.v2} />
+                        <CopyLabel>Estilo</CopyLabel>
+                        <CopyInputWrap onClick={() => copyToClipboard(STYLE_TAG)} title="Click para copiar">
+                          <CopyInput readOnly value={STYLE_TAG} />
                           <CopyIcon />
                         </CopyInputWrap>
                       </CopyField>
                     </CopyRow>
 
                     <SongCopyBox
-                      onClick={() => copyToClipboard(`V1: ${t1}\nV2: ${t2}\n\n${e.songLetra}`)}
-                      title="Click para copiar (títulos + letra)"
+                      onClick={() => copyToClipboard(`${e.songTitulo}\n\n${e.songLetra}`)}
+                      title="Click para copiar (título + letra)"
                     >
                       <div className="pre">{e.songLetra}</div>
                     </SongCopyBox>
@@ -437,13 +268,12 @@ export function HistoryPage() {
                 </Expand>
 
                 <div onClick={(ev) => ev.stopPropagation()}>
-                  <div style={{ marginTop: 10, opacity: 0.78, fontSize: 12 }}>
-                    Drop: MP3 y SRT. Asignación automática: primero V1, luego V2. Si ya está todo subido, borra asignación.
-                  </div>
-                  <DropZone
-                    onDropFile={(file) => onDropForEntry(e, file)}
-                    onInfo={(m) => setToast(m)}
-                  />
+                  <DropZone onDropFile={(file) => {
+                    if(!e.songTitulo){
+                      throw new Error("No se puede guardar el archivo porque no tiene título");
+                    }
+                    return onDropForEntry(e, file)
+                  }} />
                 </div>
               </>
             )}

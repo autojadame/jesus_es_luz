@@ -50,7 +50,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   library: {
     saveToLibrary: (payload: any) => ipcRenderer.invoke("library:saveToLibrary", payload),
-    checkSongTitle: (payload: any) => ipcRenderer.invoke("library:checkSongTitle", payload),
     copyToDownloads: (payload: any) => ipcRenderer.invoke("library:copyToDownloads", payload),
   },
   windowControls: {

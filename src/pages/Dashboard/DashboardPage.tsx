@@ -44,11 +44,18 @@ export function DashboardPage() {
     const discarded = new Set(discardedIds);
 
     // map: por passageId si existe algún entry con mp3 y srt guardados
-    const savedByPassage = new Map<number, { mp3: boolean; srt: boolean }>();
+    const savedByPassage = new Map<number, { mp3: boolean; wav: boolean; srt: boolean }>();
     for (const e of historyEntries as any[]) {
-      const cur = savedByPassage.get(e.passageId) ?? { mp3: false, srt: false };
+      const cur = savedByPassage.get(e.passageId) ?? { mp3: false, wav: false, srt: false };
+      // ✅ compat (formato antiguo)
       if (e?.saved?.mp3) cur.mp3 = true;
+      if (e?.saved?.wav) cur.wav = true;
       if (e?.saved?.srt) cur.srt = true;
+
+      // ✅ nuevo (por versiones): consideramos “completo” si existen V1 y V2
+      if (e?.saved?.v1?.mp3 && e?.saved?.v2?.mp3) cur.mp3 = true;
+      if (e?.saved?.v1?.wav && e?.saved?.v2?.wav) cur.wav = true;
+      if (e?.saved?.v1?.srt && e?.saved?.v2?.srt) cur.srt = true;
       savedByPassage.set(e.passageId, cur);
     }
 
@@ -60,7 +67,7 @@ export function DashboardPage() {
       if (discarded.has(it.id)) continue;
 
       const saved = savedByPassage.get(it.id);
-      const isComplete = !!saved?.mp3 && !!saved?.srt;
+      const isComplete = !!saved?.mp3 && !!saved?.wav && !!saved?.srt;
       if (isComplete) continue; // ✅ ya tiene MP3+SRT
 
       out.push(it);
@@ -133,7 +140,7 @@ export function DashboardPage() {
     return (
       <Wrap>
         <div style={{ opacity: 0.8 }}>
-          No hay pasajes pendientes: los disponibles ya tienen MP3 y SRT (o están descartados). Ve a{" "}
+          No hay pasajes pendientes: los disponibles ya tienen MP3, WAV y SRT (o están descartados). Ve a{" "}
           <b>Settings</b> para cargar más o a <b>Histórico</b>.
         </div>
       </Wrap>
